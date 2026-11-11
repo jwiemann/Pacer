@@ -54,10 +54,10 @@ def throughput(hist, idx, minutes=60):
 
 
 def quota_spark(pts, reset, span, usage, now):
-    """Mini graph of one quota window for a sidebar tab: ([(x 0..1, percent)], top) or None without a running window
+    """Mini graph of one quota window for a sidebar tab: ([(x 0..1, percent)], 100.0) or None without a running window
     or with fewer than two readings. The window's readings (end = `reset` ISO time, length `span` s) up to `now` plus the
-    current `usage` are stretched over the whole graph width and the height follows the highest value (at least 5 %),
-    so even a small curve fills the space; the burn-up chart shows the absolute picture."""
+    current `usage` are spread over the whole graph width, but the height is always 0..100 %: the graph shows how far
+    from the limit the quota really is, a small curve stays small."""
     try:
         end = datetime.fromisoformat(reset).timestamp() if reset else None
     except ValueError:
@@ -69,7 +69,7 @@ def quota_spark(pts, reset, span, usage, now):
     t0, t1 = rows[0][0], rows[-1][0]
     if t1 <= t0:
         return None
-    return [((t - t0) / (t1 - t0), v) for t, v in rows], max(max(v for _t, v in rows), 5.0)
+    return [((t - t0) / (t1 - t0), v) for t, v in rows], 100.0
 
 
 TOKENS_FILE = os.path.join(DIR, "token-usage.json")
