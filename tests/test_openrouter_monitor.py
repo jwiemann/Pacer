@@ -31,6 +31,52 @@ def test_overspent_key_reads_at_most_100_percent():
     assert om.reading({"limit": 5, "limit_remaining": -1, "limit_reset": "daily"}, WED)["used"] == 100
 
 
+MODELS_YML = """providers:
+  other:
+    apiKey: sk-or-v1-other
+  openrouter:
+    baseUrl: https://openrouter.ai/api/v1
+    apiKey: sk-or-v1-omp-key
+    api: openai-completions
+"""
+
+
+@pytest.fixture
+def keys(tmp_path, monkeypatch):
+    """Key sources in a sandbox: a fake home with omp's models.yml, an empty key file path, no env key."""
+    (tmp_path / ".omp" / "agent").mkdir(parents=True)
+    (tmp_path / ".omp" / "agent" / "models.yml").write_text(MODELS_YML, encoding="utf-8")
+    for var in ("USERPROFILE", "HOME"):
+        monkeypatch.setenv(var, str(tmp_path))
+    monkeypatch.setattr(om, "KEY_FILE", str(tmp_path / "openrouter.key"))
+    monkeypatch.delenv(om.ENV_VAR, raising=False)
+    monkeypatch.setattr(om.sys, "platform", "linux")  # no registry lookup
+    return tmp_path
+
+
+def test_the_key_omp_spends_with_beats_the_environment_key(keys, monkeypatch):
+    monkeypatch.setenv(om.ENV_VAR, "sk-or-v1-env-key")
+    assert om.read_key() == "sk-or-v1-omp-key"
+
+
+def test_the_key_file_overrides_omp_and_the_environment(keys, monkeypatch):
+    monkeypatch.setenv(om.ENV_VAR, "sk-or-v1-env-key")
+    (keys / "openrouter.key").write_text("sk-or-v1-file-key\n", encoding="utf-8")
+    assert om.read_key() == "sk-or-v1-file-key"
+
+
+def test_without_omp_config_the_environment_key_is_used(keys, monkeypatch):
+    (keys / ".omp" / "agent" / "models.yml").unlink()
+    monkeypatch.setenv(om.ENV_VAR, "sk-or-v1-env-key")
+    assert om.read_key() == "sk-or-v1-env-key"
+
+
+def test_omp_entry_that_is_not_a_literal_key_is_ignored(keys):
+    (keys / ".omp" / "agent" / "models.yml").write_text(MODELS_YML.replace("sk-or-v1-omp-key", "OPENROUTER_API_KEY"),
+                                                        encoding="utf-8")
+    assert om.read_key() is None
+
+
 @pytest.mark.parametrize(("adapter", "model", "provider"), [
     ("opencode_local", "openrouter/anthropic/claude-sonnet-4.5", "openrouter"),
     ("pi_local", "openrouter/google/gemini-3-flash-preview", "openrouter"),

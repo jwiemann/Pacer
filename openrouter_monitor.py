@@ -5,10 +5,11 @@ Asks OpenRouter for the spend limit of the API key (GET /api/v1/key: limit, limi
   openrouter-history.jsonl one {"t": epoch, "used": percent} line per reading (chart history, trimmed to ~45 days)
 The key is the limit of ONE OpenRouter API key, set in the OpenRouter dashboard. A key without a limit is shown but never
 throttled; a limit that resets (daily / weekly / monthly, midnight UTC) is a pace like Copilot's month, one that never
-resets is only a percentage. Key lookup: env OPENROUTER_API_KEY, the Windows user environment, then openrouter.key in the
-Pacer data dir. Exit code 0 even without a key: that is a state to show, not a failure of this job.
+resets is only a percentage. Key lookup: openrouter.key in the Pacer data dir, the key omp is configured with (apiKey of the
+openrouter provider in ~/.omp/agent/models.yml), env OPENROUTER_API_KEY, then the Windows user environment. Exit code 0 even
+without a key: that is a state to show, not a failure of this job.
 """
-import json, os, sys, time
+import json, os, re, sys, time
 from datetime import datetime, timedelta, timezone
 
 import fsutil, http_util, pacer_config
@@ -42,21 +43,33 @@ def read_status():
         return {}
 
 
+def omp_key():
+    """The OpenRouter key omp (and so the agents) call the API with: `apiKey` of the openrouter provider in omp's
+    models.yml. None if the file or the entry is missing or the value is not a literal key."""
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".omp", "agent", "models.yml"), encoding="utf-8") as f:
+            m = re.search(r"^\s*openrouter:\s*\n(?:.*\n)*?\s*apiKey:\s*['\"]?(sk-or-[\w-]+)", f.read(), re.M)
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
 def read_key():
-    """The API key or None. A shell or tray started before the key was set does not see it in its environment: the user
-    environment in the registry is read as well."""
-    key = os.environ.get(ENV_VAR, "").strip()
+    """The API key or None. The spend limit that matters is that of the key the agents spend with, so the key file in
+    the data dir (explicit override) comes first, then the key omp is configured with, then the OPENROUTER_API_KEY
+    environment (a shell or tray started before it was set does not see it: the user environment in the registry is
+    read as well). The env key is often a different key (e.g. one used by another tool) without a limit."""
+    try:
+        with open(KEY_FILE, encoding="utf-8") as f:
+            key = f.read().strip()
+    except OSError:
+        key = ""
+    key = key or omp_key() or os.environ.get(ENV_VAR, "").strip()
     if not key and sys.platform == "win32":
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
                 key = str(winreg.QueryValueEx(k, ENV_VAR)[0]).strip()
-        except OSError:
-            pass
-    if not key:
-        try:
-            with open(KEY_FILE, encoding="utf-8") as f:
-                key = f.read().strip()
         except OSError:
             pass
     return key or None
