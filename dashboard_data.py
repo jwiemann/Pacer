@@ -213,10 +213,8 @@ def pct_text(v):
 
 
 def fmt_cents(v):
-    """US cents per second with enough digits to read small rates: 0 -> '0', 0.0237 -> '0.024', 1.4 -> '1.40'."""
-    if v <= 0:
-        return "0"
-    return f"{v:.2f}" if v >= 1 else f"{v:.3f}" if v >= 0.01 else f"{v:.4f}"
+    """Euro cents per second with two places after the dot: 0.0237 -> '0.02', 1.4 -> '1.40'."""
+    return f"{max(v, 0.0):.2f}"
 
 
 FX_FILE = os.path.join(DIR, "fx-usd-eur.json")
