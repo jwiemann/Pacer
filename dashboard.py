@@ -95,9 +95,10 @@ class Dashboard:
             ctypes.windll.dwmapi.DwmSetWindowAttribute(_u32.GetParent(root.winfo_id()), 20, ctypes.byref(ctypes.c_int(1)), 4)
         except Exception:
             pass
-        self.pinned = None  # tab picked by the user; None = follow the limiting window
+        self.pinned = self.saved_choice("pinnedTab", ("live", "5h", "7d", "cop", "or"))  # tab picked by the user (remembered); None = follow the limiting window
         self.upd_busy = False  # paperclipai update check running in a worker thread
         self._job = None    # pending refresh timer
+        self._geo_job = None  # pending save of the window geometry
         self.ka_var = tk.BooleanVar()
         self.si_var = tk.BooleanVar()
         self.split_var = tk.BooleanVar()
@@ -160,7 +161,8 @@ class Dashboard:
         self.chart.bind("<Motion>", self.chart_motion)
         self.chart.bind("<Leave>", self.chart_leave)
         self.drag = None  # (pointer x, zoom, live width, live end) at the start of a drag on the chart
-        self.live_preset, self.live_width, self.live_end = "5m", LIVE_CHIPS["5m"], None  # Live chart: preset, shown span (s), end (None = now)
+        self.live_preset = self.saved_choice("livePreset", tuple(LIVE_CHIPS)) or "5m"  # Live chart: preset (remembered), shown span (s), end (None = now)
+        self.live_width, self.live_end = LIVE_CHIPS[self.live_preset], None
         self.window_ends, self.live_hits, self.live_n = {}, [], 0
         self.hover_t, self.live_t0, self.live_t1 = None, None, None  # Live chart: the epoch under the pointer, the drawn window
         # fault / stale-data message: left of the big percentage, so it never changes the window height
@@ -438,8 +440,28 @@ class Dashboard:
         them, because the stacked column costs the chart most of the height."""
         return bool(read_settings().get("detailsCompact" if self.compact else "detailsWide", not self.compact))
 
+    @staticmethod
+    def saved_choice(key, allowed):
+        """A UI choice remembered in the settings file; None when missing or no longer valid."""
+        v = read_settings().get(key)
+        return v if v in allowed else None
+
+    def remember_geometry(self):
+        """Saves size and position shortly after the last move or resize, so a dashboard that was killed (restart after an
+        update, crash, logoff) reopens where it was, not only after a proper close."""
+        if self._geo_job:
+            self.root.after_cancel(self._geo_job)
+        self._geo_job = self.root.after(1500, self.save_geometry)
+
+    def save_geometry(self):
+        self._geo_job = None
+        if self.root.state() == "normal" and not self.page_open:  # not while minimised or while the settings page resizes it
+            save_position(self.root)
+
     def on_resize(self, e):
-        """Switch between the wide and the compact layout when the window width crosses WIDE_MIN."""
+        """Switch between the wide and the compact layout when the window width crosses WIDE_MIN; remember the geometry."""
+        if e.widget is self.root:
+            self.remember_geometry()
         compact = e.width < WIDE_MIN
         if e.widget is not self.root or compact == self.compact:
             return
@@ -567,6 +589,7 @@ class Dashboard:
         for x0, x1, key in self.live_hits:
             if x0 <= e.x <= x1:
                 self.live_preset, self.live_width, self.live_end = key, LIVE_CHIPS[key], None
+                write_settings(livePreset=key)
                 self.live_frame()
                 return
 
@@ -1180,11 +1203,13 @@ class Dashboard:
     def pick(self, win):
         """Click a tab to show (and keep) that window."""
         self.pinned = win
+        write_settings(pinnedTab=win)
         self.refresh()
 
     def unpin(self):
         """Right click on a tab: follow the limiting window again."""
         self.pinned = None
+        write_settings(pinnedTab=None)
         self.refresh()
 
     # ---- rendering
