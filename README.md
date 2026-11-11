@@ -38,6 +38,7 @@ Roles are documented in the docstring of `pacer.py`.
 | `pacer_config.py` | environment detection and overrides, data dir |
 | `fsutil.py`, `http_util.py`, `logutil.py` | atomic writes and locks, HTTP helper, rotating logs |
 | `packaging/` | PyInstaller spec, Inno Setup installer, build script |
+| `fonts/` | bundled [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) (SIL Open Font License 1.1, `fonts/OFL.txt`), loaded privately by the dashboard; nothing is installed |
 
 ## Data
 

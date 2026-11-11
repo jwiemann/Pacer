@@ -2,7 +2,9 @@
 
 The palette is plain hex strings. HEX maps the tone names dashboard_data returns ("good", "warn", ...) to them.
 """
+import ctypes, os, sys
 import tkinter as tk
+import tkinter.font as tkfont
 
 from PIL import Image, ImageDraw, ImageTk
 
@@ -12,6 +14,77 @@ GOOD, WARN, BAD, BLUE = "#2eb85c", "#f0a020", "#e13232", "#5a9bff"
 AREA, GRID, TAB_ON = "#2c374a", "#34383f", "#2c3340"
 VIOLET = "#b07cff"
 HEX = {"good": GOOD, "warn": WARN, "bad": BAD, "blue": BLUE, "muted": MUTED}
+
+
+FONT_FILES = ("JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf")  # bundled in fonts/ (SIL OFL 1.1, see fonts/OFL.txt)
+MONO_FAMILIES = ("JetBrains Mono", "JetBrainsMono NFM", "Cascadia Mono", "Consolas")  # the first one that exists is used
+MONO = "Consolas"  # replaced by init_fonts()
+
+
+def init_fonts():
+    """Loads the bundled JetBrains Mono for this process only (nothing is installed: FR_PRIVATE) and picks the monospace
+    family of the UI, the first of MONO_FAMILIES that exists. Needs a Tk root: call it before the first widget is built."""
+    global MONO
+    base = os.path.join(getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__)), "fonts")
+    for name in FONT_FILES:
+        try:
+            ctypes.windll.gdi32.AddFontResourceExW(os.path.join(base, name), 0x10, 0)
+        except (OSError, AttributeError):
+            pass
+    have = {f.lower() for f in tkfont.families()}
+    MONO = next((f for f in MONO_FAMILIES if f.lower() in have), "Courier New")
+    return MONO
+
+
+def mono(size, bold=False):
+    """Tk font tuple of the monospace UI font (numbers, headings, chart text)."""
+    return (MONO, size, "bold") if bold else (MONO, size)
+
+
+def corner_images(r, outer, fill, border):
+    """The four corners (top left, top right, bottom left, bottom right) of a rounded box as r x r PIL images: the colour
+    `outer` behind the box, a 1 px arc in `border`, the box `fill` inside; anti-aliased by 8x supersampling. Laid over the
+    corners of a square widget whose own 1 px border is `border`, they round it."""
+    S = 8
+    n = 2 * r * S
+    img = Image.new("RGB", (n, n), outer)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, n - 1, n - 1), radius=r * S, fill=border)
+    if fill != border:
+        d.rounded_rectangle((S, S, n - 1 - S, n - 1 - S), radius=(r - 1) * S, fill=fill)
+    img = img.resize((2 * r, 2 * r), Image.LANCZOS)
+    return [img.crop(box) for box in ((0, 0, r, r), (r, 0, 2 * r, r), (0, r, r, 2 * r), (r, r, 2 * r, 2 * r))]
+
+
+_corners = {}  # (r, outer, fill, border) -> the four PhotoImages (kept alive here)
+
+
+def round_corners(widget, r, outer, fill, border):
+    """Rounds the corners of a square Frame-like widget (Tk cannot clip widgets): four small corner images are placed over
+    its corners. `outer` = colour behind the widget. Returns repaint(fill=None, border=None, outer=None) for widgets that
+    change colour (hover, selected)."""
+    state = {"outer": outer, "fill": fill, "border": border}
+    labels = []
+    for kw in (dict(x=0, y=0, anchor="nw"), dict(relx=1.0, x=0, y=0, anchor="ne"),
+               dict(x=0, rely=1.0, y=0, anchor="sw"), dict(relx=1.0, rely=1.0, x=0, y=0, anchor="se")):
+        lb = tk.Label(widget, bd=0, highlightthickness=0, padx=0, pady=0)
+        lb.place(bordermode="outside", **kw)
+        labels.append(lb)
+
+    def paint():
+        key = (r, state["outer"], state["fill"], state["border"])
+        if key not in _corners:
+            _corners[key] = [ImageTk.PhotoImage(im) for im in corner_images(*key)]
+        for lb, im in zip(labels, _corners[key]):
+            lb.config(image=im, bg=state["outer"])
+
+    def repaint(fill=None, border=None, outer=None):
+        new = {"fill": fill or state["fill"], "border": border or state["border"], "outer": outer or state["outer"]}
+        if new != state:
+            state.update(new)
+            paint()
+    paint()
+    return repaint
 
 
 def button(parent, text, cmd, primary=False, icon=None, pad=(12, 7)):
@@ -26,15 +99,17 @@ def button(parent, text, cmd, primary=False, icon=None, pad=(12, 7)):
     if icon:
         parts.append(tk.Label(inner, text=icon, bg=base, fg=fg, font=("Segoe MDL2 Assets", 10)))
         parts[-1].pack(side="left", padx=(0, 8))
-    parts.append(tk.Label(inner, text=text, bg=base, fg=fg, font=("Segoe UI", 9)))
+    parts.append(tk.Label(inner, text=text, bg=base, fg=fg, font=mono(9)))
     parts[-1].pack(side="left")
     allw = [f] + parts
+    rc = round_corners(f, 6, parent.cget("bg"), base, base)  # rounded; the corners follow the hover colour
 
     col = {"base": base, "hover": hover}
 
     def paint(c):
         for w in allw:
             w.config(bg=c)
+        rc(fill=c, border=c)
 
     def set_state(label=None, danger=False):
         """Swap the label and/or turn the button red (used for 'click again to confirm')."""
@@ -81,7 +156,7 @@ def stepper(parent, var, on_edit, lo=1, hi=100):
     """Dark number input: [-] [value] [+] (tk.Spinbox cannot be themed or padded)."""
     f = tk.Frame(parent, bg=BORDER, padx=1, pady=1)
     entry = tk.Entry(f, textvariable=var, width=4, justify="center", bg=INPUT, fg=FG, insertbackground=FG,
-                     relief="flat", bd=0, highlightthickness=0, font=("Segoe UI", 10),
+                     relief="flat", bd=0, highlightthickness=0, font=mono(10),
                      selectbackground=BLUE, selectforeground="#ffffff")
 
     def step(d):
@@ -93,7 +168,7 @@ def stepper(parent, var, on_edit, lo=1, hi=100):
         on_edit()
 
     def btn(text, d):
-        b = tk.Label(f, text=text, width=3, bg=BTN, fg=FG, font=("Segoe UI", 10), cursor="hand2")
+        b = tk.Label(f, text=text, width=3, bg=BTN, fg=FG, font=mono(10), cursor="hand2")
         b.bind("<Button-1>", lambda _e: step(d))
         b.bind("<Enter>", lambda _e: b.config(bg=BTN_HOVER))
         b.bind("<Leave>", lambda _e: b.config(bg=BTN))
@@ -188,10 +263,11 @@ class Tab:
         self.inner = tk.Frame(self.frame, padx=4, pady=2)
         self.inner.pack(fill="both", expand=True)
         self.dot = tk.Label(self.inner, text="\u25cf", font=("Segoe UI", 9), padx=0, pady=0)
-        self.name = tk.Label(self.inner, text=name, font=("Segoe UI", 10, "bold"), width=6, anchor="w", padx=0, pady=0)  # same width in every tab: equal graphs
-        self.use = tk.Label(self.inner, text="-", font=("Segoe UI", 10), width=6, anchor="e", padx=0, pady=0)
+        self.name = tk.Label(self.inner, text=name, font=mono(9, True), width=6, anchor="w", padx=0, pady=0)  # same width in every tab: equal graphs
+        self.use = tk.Label(self.inner, text="-", font=mono(9), width=6, anchor="e", padx=0, pady=0)
         self.spark = tk.Canvas(self.inner, width=self.SPARK_MIN_W, height=self.SPARK_H, highlightthickness=0)
         self.layout(False)
+        self.round = round_corners(self.frame, 6, parent.cget("bg"), PANEL, BORDER)  # recoloured in set()
         self.parts = (self.inner, self.dot, self.name, self.use, self.spark)
         self.spark_state = (None, MUTED)  # what _draw_spark last got, to redraw when the canvas is resized
         self.spark.bind("<Configure>", lambda _e: self._draw_spark(*self.spark_state))
@@ -211,16 +287,16 @@ class Tab:
         if compact:
             self.inner.config(padx=4, pady=1)
             self.dot.config(font=("Segoe UI", 7))
-            self.name.config(width=0, font=("Segoe UI", 8, "bold"))
-            self.use.config(width=5, anchor="w", font=("Segoe UI", 11, "bold"))
+            self.name.config(width=0, font=mono(8, True))
+            self.use.config(width=5, anchor="w", font=mono(10, True))
             self.dot.grid(row=0, column=0)
             self.name.grid(row=0, column=1, sticky="w", padx=(2, 0))
             self.use.grid(row=1, column=0, columnspan=2, sticky="w")
         else:
             self.inner.config(padx=0, pady=0)  # the graph touches the tab's border
             self.dot.config(font=("Segoe UI", 9))
-            self.name.config(width=6, font=("Segoe UI", 10, "bold"))  # same width in every tab: equal graphs
-            self.use.config(width=6, anchor="e", font=("Segoe UI", 10))
+            self.name.config(width=6, font=mono(9, True))  # same width in every tab: equal graphs
+            self.use.config(width=6, anchor="e", font=mono(9))
             self.dot.grid(row=0, column=0, padx=(4, 0))
             self.name.grid(row=0, column=1, padx=(3, 3))
             self.spark.grid(row=0, column=2, sticky="nsew")  # takes the width left and the whole tab height
@@ -230,6 +306,7 @@ class Tab:
         """spark: (points, top) with points [(x 0..1, value)] drawn like a Task Manager graph (value 0..top), or None.
         paused: the provider behind this window is paused or draining: a pause sign replaces the state dot."""
         self.frame.config(bg=BLUE if selected else BORDER)
+        self.round(fill=TAB_ON if selected else PANEL, border=BLUE if selected else BORDER)
         for w in self.parts:
             w.config(bg=TAB_ON if selected else PANEL)
         self.dot.config(fg=color, text="\u23f8" if paused else "\u25cf")

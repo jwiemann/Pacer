@@ -40,7 +40,7 @@ from dashboard_data import (LAST, history, past_resets, throughput, kick_token_d
                             quota_history, quota_moved, COPILOT_HIST, OPENROUTER_HIST, pct_text, copilot_login, openrouter_key,
                             quota_spark)
 from ui_widgets import (BG, PANEL, FG, MUTED, BTN_HOVER, GOOD, WARN, BAD, BLUE, AREA, GRID, VIOLET, HEX, BORDER,  # noqa: E402
-                        Switch, Tab, button, split_button, stepper)
+                        Switch, Tab, button, split_button, stepper, init_fonts, mono, round_corners)
 from winpos import save_position, saved_size, saved_position, work_area  # noqa: E402
 
 LOGGER = logutil.get_logger("dashboard", "tray-ui.log")  # the same log file as the tray's
@@ -87,6 +87,7 @@ def countdown_text(reset):
 class Dashboard:
     def __init__(self):
         root = self.root = tk.Tk()
+        LIVE_PAL["mono"] = init_fonts()  # bundled JetBrains Mono (private to this process); the charts draw their text with it
         root.title(TITLE)
         root.configure(bg=BG)
         root.resizable(True, True)
@@ -111,8 +112,9 @@ class Dashboard:
         def panel(title=None, parent=None, card=False):  # placed by apply_layout(); card: bordered, divider under the title
             f = tk.Frame(parent or root, bg=PANEL, padx=PAD, pady=PAD - 2,
                          **({"highlightbackground": BORDER, "highlightthickness": 1} if card else {}))
+            round_corners(f, 8, (parent or root).cget("bg"), PANEL, BORDER if card else PANEL)  # rounded card
             if title:
-                tk.Label(f, text=title.upper(), bg=PANEL, fg=MUTED, font=("Segoe UI", 8, "bold")).grid(
+                tk.Label(f, text=title.upper(), bg=PANEL, fg=MUTED, font=mono(8, True)).grid(
                     row=0, column=0, columnspan=2, sticky="w", pady=(0, 10 if card else 6))
                 if card:
                     tk.Frame(f, bg=BORDER, height=1).grid(row=0, column=0, columnspan=2, sticky="sew", pady=(0, 6))
@@ -129,18 +131,18 @@ class Dashboard:
         self.or_tab = True  # OPENROUTER tab shown: key present and it has a spend limit
         for title, wins in (("LIVE", (("live", "Tokens"),)), ("CLAUDE", (("5h", "5h"), ("7d", "7d"))), ("COPILOT", (("cop", "Month"),)),
                             ("OPENROUTER", (("or", "Limit"),))):
-            hdr = tk.Label(side, text=title, bg=PANEL, fg=MUTED, font=("Segoe UI", 8, "bold"), anchor="w", padx=0, pady=0)
+            hdr = tk.Label(side, text=title, bg=PANEL, fg=MUTED, font=mono(8, True), anchor="w", padx=0, pady=0)
             for win, label in wins:
                 self.tabs[win] = Tab(side, label, lambda w=win: self.pick(w), self.unpin, self.toggle_tabs_only)
             self.groups.append((title, hdr, [w for w, _l in wins]))
         self.place_side()
 
         self.big_box = tk.Frame(pace, bg=PANEL)  # the big percentage, the spend rate and the reset countdown below it
-        self.big = tk.Label(self.big_box, bg=PANEL, fg=FG, font=("Segoe UI", 26, "bold"), width=5, anchor="e", pady=0)
+        self.big = tk.Label(self.big_box, bg=PANEL, fg=FG, font=mono(24, True), width=5, anchor="e", pady=0)
         self.big.pack(anchor="e")
-        self.cost = tk.Label(self.big_box, text=" ", bg=PANEL, fg=MUTED, font=("Segoe UI", 9), anchor="e", pady=0)  # spend rate, blank while zero
+        self.cost = tk.Label(self.big_box, text=" ", bg=PANEL, fg=MUTED, font=mono(9), anchor="e", pady=0)  # spend rate, blank while zero
         self.cost.pack(anchor="e")
-        self.sub = tk.Label(self.big_box, text=" ", bg=PANEL, fg=GOOD, font=("Segoe UI", 9), anchor="e")  # a blank keeps its row
+        self.sub = tk.Label(self.big_box, text=" ", bg=PANEL, fg=GOOD, font=mono(9), anchor="e")  # a blank keeps its row
         self.sub.pack(anchor="e")
         self.cost.bind("<Enter>", lambda e: self.show_tip(e, self.cost_tip()))
         self.cost.bind("<Leave>", self.hide_tip)
@@ -181,7 +183,7 @@ class Dashboard:
             """Label / value rows from grid row 1; a key starting with '#' is a section header (hidden with its provider)."""
             for r, key in enumerate(keys, 1):
                 if key.startswith("#"):
-                    hdr = self.heads[key[1:]] = tk.Label(frame, text=key[1:], bg=PANEL, fg=MUTED, font=("Segoe UI", 8, "bold"))
+                    hdr = self.heads[key[1:]] = tk.Label(frame, text=key[1:], bg=PANEL, fg=MUTED, font=mono(8, True))
                     hdr.grid(row=r, column=0, columnspan=2, sticky="w", pady=(0 if r == 1 else 14, 0))
                     hdr.sep = None if r == 1 else tk.Frame(frame, bg=BORDER, height=1)  # divider above every section but the first
                     if hdr.sep:
@@ -189,7 +191,7 @@ class Dashboard:
                     continue
                 self.lbls[key] = tk.Label(frame, text=key, bg=PANEL, fg=MUTED, font=("Segoe UI", 9))
                 self.lbls[key].grid(row=r, column=0, sticky="w", pady=2)
-                self.vals[key] = tk.Label(frame, bg=PANEL, fg=FG, font=("Segoe UI", 9), anchor="w")
+                self.vals[key] = tk.Label(frame, bg=PANEL, fg=FG, font=mono(9), anchor="w")
                 self.vals[key].grid(row=r, column=1, sticky="w", padx=(GAP, 0), pady=2)
 
         self.heads = {}
@@ -206,7 +208,7 @@ class Dashboard:
         pc = tk.Frame(svc, bg=PANEL)
         pc.grid(row=4, column=1, sticky="w", padx=(GAP, 0), pady=2)
         self.pc_frame = pc
-        self.vals["Paperclip"] = tk.Label(pc, bg=PANEL, fg=FG, font=("Segoe UI", 9), anchor="w")
+        self.vals["Paperclip"] = tk.Label(pc, bg=PANEL, fg=FG, font=mono(9), anchor="w")
         self.vals["Paperclip"].grid(row=0, column=0, sticky="w")
         self.upd_btn = button(pc, "Update Paperclip", self.start_update, pad=(10, 2))
         self.upd_btn.grid(row=0, column=0, sticky="w")
@@ -234,7 +236,7 @@ class Dashboard:
         head = self.page_head = tk.Frame(page, bg=BG)
         back = button(head, "Back", self.close_settings, icon="\uE72B")
         back.pack(side="left")
-        tk.Label(head, text="SETTINGS", bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(side="left", padx=GAP)
+        tk.Label(head, text="SETTINGS", bg=BG, fg=MUTED, font=mono(9, True)).pack(side="left", padx=GAP)
         self.apply_btn = button(head, "Apply", self.apply_limits, primary=True, icon="\uE74E")
         self.prov = {}  # provider -> its setting variables, limit rows (hidden under full budget), card and saved settings
         for name in throttle.PROVIDERS:
@@ -1132,7 +1134,7 @@ class Dashboard:
         glyph = SYMBOLS.get(head)
         self.sym_tip[key] = "" if glyph is None or head == "OK" else head
         if glyph is None:
-            self.vals[key].config(text=text, fg=color, font=("Segoe UI", 9))
+            self.vals[key].config(text=text, fg=color, font=mono(9))
         else:
             self.vals[key].config(text=glyph + sep + rest, fg=color, font=("Segoe UI Symbol", 10, "bold"))
 
@@ -1584,7 +1586,7 @@ class Dashboard:
         pw, ph = W - L - R, H - T - B
         yb = T + ph
         self.plot_x = (L, W - R)
-        small = ("Segoe UI", 8)
+        small = mono(8)
 
         def Y(v):
             return T + ph * (1 - min(max(v, 0), 100) / 100)
@@ -1603,7 +1605,7 @@ class Dashboard:
         if end is None or usage is None:
             grid()
             ylabels()
-            c.create_text(L + pw / 2, T + ph / 2, fill=MUTED, font=("Segoe UI", 10),
+            c.create_text(L + pw / 2, T + ph / 2, fill=MUTED, font=mono(9),
                           text={"cop": "No Copilot reading yet",
                                 "or": "The limit of this key never resets" if usage is not None else "No OpenRouter reading yet",
                                 }.get(win, "No active window - it starts with your next message"))
@@ -1711,7 +1713,7 @@ class Dashboard:
             if used:
                 label = f"{'+' if usage >= plan_now else '-'}{fmt_tok((usage - plan_now) * used / usage)}"
         label = label.replace("-", "\u2212")
-        font9 = ("Segoe UI", 9, "bold")
+        font9 = mono(9, True)
         tw = tkfont.Font(font=font9).measure(label)
 
         def plan_y(x):  # y of the plan line at pixel x

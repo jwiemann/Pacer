@@ -80,7 +80,8 @@ def draw_live(c, series, layout, pal, chips, active, resets=(), cache=None, spli
     L, R, T, B = PLOT_L, PLOT_R, 40, 22  # T leaves room for the two legend rows (rate, cache hit)
     pw, ph = W - L - R, H - T - B
     yb = T + ph
-    small = ("Segoe UI", 8)
+    fam = pal.get("mono", "Segoe UI")  # font family of all chart text (the dashboard passes its monospace font)
+    small = (fam, 8)
     names = [n for n, _l, _c in layout]
     top = nice_max(max((max(series[n]) for n in names), default=0))
 
@@ -114,7 +115,7 @@ def draw_live(c, series, layout, pal, chips, active, resets=(), cache=None, spli
         k += 1
     if hx is not None:  # the hovered sample's time instead of the tick labels it would run into
         c.create_text(min(max(hx, L + 26), W - R - 26), yb + 6, text=datetime.fromtimestamp(times[hi]).strftime(fmt),
-                      fill=pal["fg"], font=("Segoe UI", 8, "bold"), anchor="n")
+                      fill=pal["fg"], font=(fam, 8, "bold"), anchor="n")
 
     def flat(values):
         return [q for t, y in zip(times, values) for q in (X(t), Y(y))]
@@ -189,10 +190,10 @@ def draw_live(c, series, layout, pal, chips, active, resets=(), cache=None, spli
                     c.create_rectangle(x - 2, y - 6, x + 10, y + 6, fill=shade[hatch[0]][0], outline=colour, tags="legend")
                     if hatch[1]:
                         c.create_rectangle(x - 1, y - 5, x + 10, y + 6, fill=shade[hatch[0]][1], outline="", stipple=hatch[1], tags="legend")
-                t = c.create_text(x + 13, y, text=txt, fill=pal["fg"], font=("Segoe UI", 9), anchor="w", tags="legend")
+                t = c.create_text(x + 13, y, text=txt, fill=pal["fg"], font=(fam, 8), anchor="w", tags="legend")
                 right = c.bbox(t)[2]
                 if below and form == 0:
-                    b = c.create_text(x + 13, y + 16, text=below, fill=pal["muted"], font=("Segoe UI", 8), anchor="w", tags="legend")
+                    b = c.create_text(x + 13, y + 16, text=below, fill=pal["muted"], font=(fam, 7), anchor="w", tags="legend")
                     right = max(right, c.bbox(b)[2])
                 x = right + (16 if form == 0 else 10)
             edges.append(right if entries else L)
@@ -204,7 +205,7 @@ def draw_live(c, series, layout, pal, chips, active, resets=(), cache=None, spli
     hits, x = [], W - R  # range chips, right-aligned
     for key in reversed(chips):
         t = c.create_text(x - 6, 12, text=key, fill=pal["fg"] if key == active else pal["muted"],
-                          font=("Segoe UI", 9, "bold" if key == active else "normal"), anchor="e")
+                          font=(fam, 8, "bold" if key == active else "normal"), anchor="e")
         x0, _, x1, _ = c.bbox(t)
         if key == active:
             c.create_line(x0, 21, x1, 21, fill=pal["fg"])
@@ -215,5 +216,5 @@ def draw_live(c, series, layout, pal, chips, active, resets=(), cache=None, spli
             c.delete("legend")
             edges = legend(form)
     if all(max(series[n]) == 0 for n in names):
-        c.create_text(L + pw / 2, T + ph / 2, text="No AI activity", fill=pal["muted"], font=("Segoe UI", 10))
+        c.create_text(L + pw / 2, T + ph / 2, text="No AI activity", fill=pal["muted"], font=(fam, 9))
     return hits
