@@ -55,14 +55,16 @@ def _monitors():
     return found
 
 
-def save_position(root):
+def save_position(root, size=None):
+    """Stores the window position and size; `size` (w, h) replaces the current size (tabs-only mode keeps the size of the
+    normal window)."""
     x, y = root.winfo_x(), root.winfo_y()
     hmon = ctypes.windll.user32.MonitorFromPoint(_POINT(x + root.winfo_width() // 2, y + root.winfo_height() // 2), 2)  # DEFAULTTONEAREST
     info = _MONITORINFOEXW()
     info.cbSize = ctypes.sizeof(info)
     ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info))
     data = {"monitor": _monitor_id(info.szDevice), "x": x - info.rcMonitor.left, "y": y - info.rcMonitor.top,
-            "w": root.winfo_width(), "h": root.winfo_height()}
+            "w": size[0] if size else root.winfo_width(), "h": size[1] if size else root.winfo_height()}
     with open(POS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f)
 

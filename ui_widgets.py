@@ -181,15 +181,15 @@ class Switch(tk.Frame):
 class Tab:
     """Window selector: state dot, window name, mini graph, usage. The selected tab gets a blue frame.
     layout(compact=True) turns it into a small tile (name above the usage, no graph) for a narrow window."""
-    SPARK_MIN_W, SPARK_H = 60, 26
+    SPARK_MIN_W, SPARK_H = 84, 40
 
-    def __init__(self, parent, name, on_click, on_right_click=None):
+    def __init__(self, parent, name, on_click, on_right_click=None, on_double_click=None):
         self.frame = tk.Frame(parent, bg=BORDER, padx=1, pady=1)
-        self.inner = tk.Frame(self.frame, padx=10, pady=4)
+        self.inner = tk.Frame(self.frame, padx=4, pady=2)
         self.inner.pack(fill="both", expand=True)
-        self.dot = tk.Label(self.inner, text="\u25cf", font=("Segoe UI", 9))
-        self.name = tk.Label(self.inner, text=name, font=("Segoe UI", 10, "bold"), width=6, anchor="w")  # same width in every tab: equal graphs
-        self.use = tk.Label(self.inner, text="-", font=("Segoe UI", 10), width=6, anchor="e")
+        self.dot = tk.Label(self.inner, text="\u25cf", font=("Segoe UI", 9), padx=0, pady=0)
+        self.name = tk.Label(self.inner, text=name, font=("Segoe UI", 10, "bold"), width=6, anchor="w", padx=0, pady=0)  # same width in every tab: equal graphs
+        self.use = tk.Label(self.inner, text="-", font=("Segoe UI", 10), width=6, anchor="e", padx=0, pady=0)
         self.spark = tk.Canvas(self.inner, width=self.SPARK_MIN_W, height=self.SPARK_H, highlightthickness=0)
         self.layout(False)
         self.parts = (self.inner, self.dot, self.name, self.use, self.spark)
@@ -198,6 +198,8 @@ class Tab:
         for w in (self.frame,) + self.parts:
             w.config(cursor="hand2")
             w.bind("<Button-1>", lambda _e: on_click())
+            if on_double_click:  # the second click of a double click runs this instead of on_click
+                w.bind("<Double-Button-1>", lambda _e: on_double_click())
             if on_right_click:
                 w.bind("<Button-3>", lambda _e: on_right_click())
 
@@ -207,21 +209,21 @@ class Tab:
         self.inner.columnconfigure(1, weight=1 if compact else 0)
         self.inner.columnconfigure(2, weight=0 if compact else 1)
         if compact:
-            self.inner.config(padx=7, pady=2)
+            self.inner.config(padx=4, pady=1)
             self.dot.config(font=("Segoe UI", 7))
             self.name.config(width=0, font=("Segoe UI", 8, "bold"))
             self.use.config(width=5, anchor="w", font=("Segoe UI", 11, "bold"))
             self.dot.grid(row=0, column=0)
-            self.name.grid(row=0, column=1, sticky="w", padx=(3, 0))
+            self.name.grid(row=0, column=1, sticky="w", padx=(2, 0))
             self.use.grid(row=1, column=0, columnspan=2, sticky="w")
         else:
-            self.inner.config(padx=10, pady=4)
+            self.inner.config(padx=4, pady=2)
             self.dot.config(font=("Segoe UI", 9))
             self.name.config(width=6, font=("Segoe UI", 10, "bold"))  # same width in every tab: equal graphs
             self.use.config(width=6, anchor="e", font=("Segoe UI", 10))
             self.dot.grid(row=0, column=0)
-            self.name.grid(row=0, column=1, padx=6)
-            self.spark.grid(row=0, column=2, sticky="ew", padx=(0, 4))  # takes whatever width the tab has left
+            self.name.grid(row=0, column=1, padx=(3, 3))
+            self.spark.grid(row=0, column=2, sticky="ew", padx=(0, 2))  # takes whatever width the tab has left
             self.use.grid(row=0, column=3)
 
     def set(self, usage, color, selected, spark=None, paused=False):

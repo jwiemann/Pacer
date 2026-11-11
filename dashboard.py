@@ -108,6 +108,7 @@ class Dashboard:
         self.pc_on = True  # Paperclip parts shown; set_paperclip_visible() follows paperclip_enabled()
         self.vals, self.lbls = {}, {}
         self.compact, self.details = False, True  # narrow layout; Status / Services panels shown
+        self.tabs_only, self.normal_size = False, None  # tabs-only mode (double click on a tab); size of the normal window meanwhile
         self.page_open, self.page_h = False, 0  # settings page covers the window; window height before it opened
         root.rowconfigure(0, weight=1)  # extra window height goes to the chart
 
@@ -132,9 +133,9 @@ class Dashboard:
         self.or_tab = True  # OPENROUTER tab shown: key present and it has a spend limit
         for title, wins in (("LIVE", (("live", "Tokens"),)), ("CLAUDE", (("5h", "5h"), ("7d", "7d"))), ("COPILOT", (("cop", "Month"),)),
                             ("OPENROUTER", (("or", "Limit"),))):
-            hdr = tk.Label(side, text=title, bg=PANEL, fg=MUTED, font=("Segoe UI", 8, "bold"), anchor="w")
+            hdr = tk.Label(side, text=title, bg=PANEL, fg=MUTED, font=("Segoe UI", 8, "bold"), anchor="w", padx=0, pady=0)
             for win, label in wins:
-                self.tabs[win] = Tab(side, label, lambda w=win: self.pick(w), self.unpin)
+                self.tabs[win] = Tab(side, label, lambda w=win: self.pick(w), self.unpin, self.toggle_tabs_only)
             self.groups.append((title, hdr, [w for w, _l in wins]))
         self.place_side()
 
@@ -337,6 +338,12 @@ class Dashboard:
         self.apply_layout()
         min_h = self.fit_minsize()
         h = max(size[1] if size else min_h + CHART_H - CHART_MIN_H, min_h)
+        self.normal_size = (w, h)
+        if read_settings().get("tabsOnly"):  # reopened as the tab column
+            self.tabs_only = True
+            root.resizable(True, False)
+            self.apply_layout()
+            w, h = self.tabs_size(read_settings().get("tabsOnlyWidth"))
         pos = saved_position(w, h)
         x, y = pos or ((root.winfo_screenwidth() - w) // 2, (root.winfo_screenheight() - h) // 4)
         root.geometry(f"{w}x{h}+{x}+{y}")
@@ -347,11 +354,14 @@ class Dashboard:
     def apply_layout(self):
         """Place everything for the current mode. Wide: tabs left of the chart, panels in two columns, text buttons.
         Compact (narrow window): tabs as a row of tiles above the chart, panels in one column, icon-only buttons."""
+        if self.tabs_only:
+            self.apply_tabs_only()
+            return
         c, root, pace, half = self.compact, self.root, self.pace, GAP // 2
         m = PAD_COMPACT if c else PAD
         for col in (0, 1):
             root.columnconfigure(col, weight=1, uniform="col", minsize=0 if c else COL_MIN)
-        pace.config(padx=m, pady=m if c else PAD - 2)
+        pace.config(padx=m if c else PAD // 2, pady=m if c else PAD - 2, highlightthickness=1)
         pace.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=m, pady=(m, half))
         if c:
             self.side.grid(row=0, column=0, columnspan=3, rowspan=1, sticky="ew", padx=0)
@@ -359,8 +369,8 @@ class Dashboard:
             self.vdiv.grid_remove()
             self.chart.grid(row=2, column=0, columnspan=3, sticky="nsew", pady=(m, 0))
         else:
-            self.side.grid(row=0, column=0, columnspan=1, rowspan=3, sticky="nw", padx=(0, 2 * GAP))
-            self.vdiv.grid(row=0, column=0, columnspan=1, rowspan=3, sticky="nse", padx=(0, GAP))  # midway between tabs and graph
+            self.side.grid(row=0, column=0, columnspan=1, rowspan=3, sticky="nw", padx=(0, GAP))
+            self.vdiv.grid(row=0, column=0, columnspan=1, rowspan=3, sticky="nse", padx=(0, GAP // 2))  # midway between tabs and graph
             self.big_box.grid(row=1, column=2, sticky="e")
             self.headline.grid(row=1, column=1, columnspan=1, sticky="w", pady=0)
             self.chart.grid(row=2, column=1, columnspan=2, sticky="nsew", pady=(GAP, 0))
@@ -381,7 +391,7 @@ class Dashboard:
         panels = [self.st, self.svc] + ([self.agents] if self.pc_on else [])
         for f in (self.st, self.svc, self.agents):
             f.grid_remove()
-        if not self.details:
+        if not self.details or self.tabs_only:
             return
         if self.compact:
             for r, f in enumerate(panels, 1):
@@ -428,12 +438,69 @@ class Dashboard:
         """Minimum window size of the current layout: everything visible with the chart at its smallest (the whole
         settings page while that is open). Returns the height."""
         self.root.update_idletasks()
+        if self.tabs_only:
+            return self.tabs_size()[1]
         m = PAD_COMPACT if self.compact else PAD
         min_h = 2 * m + GAP + self.pace.winfo_reqheight() + self.bar.winfo_reqheight() + self.details_height()
         if self.page_open:
             min_h = self.page.winfo_reqheight()
         self.root.minsize(self.min_w, min_h)
         return min_h
+
+    def apply_tabs_only(self):
+        """Tabs-only mode: the window is just the tab column, flush to the window edges (no panels, chart or buttons)."""
+        root, pace = self.root, self.pace
+        for col in (0, 1):
+            root.columnconfigure(col, weight=1, uniform="col", minsize=0)
+        for w in (self.big_box, self.vdiv, self.headline, self.chart, self.bar, self.st, self.svc, self.agents):
+            w.grid_remove()
+        pace.config(padx=0, pady=0, highlightthickness=0)
+        pace.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
+        self.side.grid(row=0, column=0, columnspan=3, rowspan=1, sticky="nsew", padx=0)
+        self.place_side()
+
+    def tabs_size(self, width=None):
+        """(w, h) of the tabs-only window: as tall as the tab column, at least as wide (wider = bigger graphs). Sets the
+        minimum size."""
+        self.root.update_idletasks()
+        w, h = self.side.winfo_reqwidth(), self.side.winfo_reqheight()
+        self.root.minsize(w, h)
+        return max(width or 0, w), h
+
+    def fit_tabs_only(self, width=None):
+        """Window = the tab column (its height follows the tabs, e.g. when a group appears); position and width are kept."""
+        w, h = self.tabs_size(width or self.root.winfo_width())
+        self.root.geometry(f"{w}x{h}")
+
+    def toggle_tabs_only(self):
+        self.set_tabs_only(not self.tabs_only)
+
+    def set_tabs_only(self, on):
+        """Double click on a tab: the whole window turns into the tab column and back. The normal window keeps its size and
+        returns at the same place; the mode is remembered across restarts."""
+        if on == self.tabs_only or self.page_open:
+            return
+        root = self.root
+        self.hide_tip()
+        if on:
+            self.store_geometry()  # position of the normal window
+            self.normal_size = (root.winfo_width(), root.winfo_height())
+        self.tabs_only = on
+        write_settings(tabsOnly=on)
+        root.resizable(True, not on)
+        if on:
+            self.apply_layout()
+            w, h = self.tabs_size(read_settings().get("tabsOnlyWidth"))  # the tabs' own width unless widened before
+            root.geometry(f"{w}x{h}")
+            return
+        w, h = self.normal_size or (WIN_W0, 0)
+        w = max(w, self.min_w)
+        self.compact = w < WIDE_MIN
+        self.details = self.details_pref()
+        self.apply_layout()
+        h = max(h, self.fit_minsize())
+        self.set_height(h, w)  # geometry is applied asynchronously: the width must be passed, not read back
+        self.refresh()
 
     def details_pref(self):
         """Panels shown? Remembered per layout (settings detailsCompact / detailsWide); a narrow window starts without
@@ -453,27 +520,36 @@ class Dashboard:
             self.root.after_cancel(self._geo_job)
         self._geo_job = self.root.after(1500, self.save_geometry)
 
+    def store_geometry(self):
+        """Writes the window position and size to the position file. In tabs-only mode the normal window keeps its size and
+        the width of the tabs goes to the settings."""
+        if self.tabs_only:
+            write_settings(tabsOnlyWidth=self.root.winfo_width())
+            save_position(self.root, size=self.normal_size)
+        else:
+            save_position(self.root)
+
     def save_geometry(self):
         self._geo_job = None
         if self.root.state() == "normal" and not self.page_open:  # not while minimised or while the settings page resizes it
-            save_position(self.root)
+            self.store_geometry()
 
     def on_resize(self, e):
         """Switch between the wide and the compact layout when the window width crosses WIDE_MIN; remember the geometry."""
         if e.widget is self.root:
             self.remember_geometry()
         compact = e.width < WIDE_MIN
-        if e.widget is not self.root or compact == self.compact:
+        if e.widget is not self.root or self.tabs_only or compact == self.compact:
             return
         self.compact = compact
         self.details = self.details_pref()
         self.apply_layout()
         self.fit_minsize()
 
-    def set_height(self, h):
-        """Resize the window to height h (width kept), moved up when it would reach below the screen."""
+    def set_height(self, h, width=None):
+        """Resize the window to height h (width kept, or `width`), moved up when it would reach below the screen."""
         root = self.root
-        w = root.winfo_width()
+        w = width or root.winfo_width()
         x, y = (int(v) for v in re.fullmatch(r"\d+x\d+\+(-?\d+)\+(-?\d+)", root.geometry()).groups())
         _l, top, _r, bottom = work_area(x + w // 2, y)
         h = min(h, bottom - top - 40)  # leave room for the title bar
@@ -514,7 +590,7 @@ class Dashboard:
         msg, fg = getattr(self, "flash_msg", None) or (getattr(self, "headline_msg", ""), getattr(self, "headline_fg", FG))
         n = self.hl_chars  # two lines max: the tab row must not grow
         self.headline.config(text=msg if len(msg) <= n else msg[:n - 1] + "\u2026", fg=fg)
-        if self.compact:  # its own row between tiles and chart, only while there is something to say
+        if self.compact and not self.tabs_only:  # its own row between tiles and chart, only while there is something to say
             if bool(msg) == bool(self.headline.winfo_manager()):
                 return
             if msg:
@@ -740,7 +816,7 @@ class Dashboard:
 
     def close(self):
         try:
-            save_position(self.root)
+            self.store_geometry()
         finally:
             self.root.destroy()
 
@@ -943,7 +1019,7 @@ class Dashboard:
 
     def restart_tool(self):
         """Stops the tray and every dashboard of this tool, then starts tray + dashboard again (`pacer restart`)."""
-        save_position(self.root)  # the force-stop skips close(); the relaunched dashboard restores from this
+        self.store_geometry()  # the force-stop skips close(); the relaunched dashboard restores from this
         subprocess.Popen(pacer_config.self_cmd("restart"), cwd=DIR, creationflags=0x08000000 | 0x00000008,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -1005,16 +1081,18 @@ class Dashboard:
                  and (title != "COPILOT" or self.cop_on) and (title != "OPENROUTER" or self.or_tab)]
         for _hdr, wins in shown:
             for win in wins:
-                self.tabs[win].layout(self.compact)
-        if self.compact:
+                self.tabs[win].layout(self.compact and not self.tabs_only)
+        if self.compact and not self.tabs_only:
             tabs = [self.tabs[win] for _hdr, wins in shown for win in wins]
             for i, tab in enumerate(tabs):
-                tab.frame.pack(side="left", fill="both", expand=True, padx=(0, 0 if i == len(tabs) - 1 else 6))
+                tab.frame.pack(side="left", fill="both", expand=True, padx=(0, 0 if i == len(tabs) - 1 else 2))
             return
         for hdr, wins in shown:
-            hdr.pack(fill="x", pady=(0, 2))
+            hdr.pack(fill="x", pady=0)
             for i, win in enumerate(wins):
-                self.tabs[win].frame.pack(fill="x", pady=(0, GAP if i == len(wins) - 1 else GAP // 2))
+                self.tabs[win].frame.pack(fill="x", pady=(0, 4 if i == len(wins) - 1 else 1))
+        if self.tabs_only:
+            self.fit_tabs_only()
 
     def paperclip_menu(self):
         if self.pc_on:
