@@ -7,7 +7,7 @@ Colours come back as tone names ("good", "warn", "bad", "muted"); dashboard maps
 import json, os, shutil, threading, time
 from datetime import datetime
 
-import pacer_config
+import fsutil, http_util, pacer_config
 import token_dump, usage_store
 from paperclip_common import CFG, DIR, LOGS, CLAUDE_EXE, TRAY_STATE, STALE_S, fmt_min
 
@@ -217,6 +217,49 @@ def fmt_cents(v):
     if v <= 0:
         return "0"
     return f"{v:.2f}" if v >= 1 else f"{v:.3f}" if v >= 0.01 else f"{v:.4f}"
+
+
+FX_FILE = os.path.join(DIR, "fx-usd-eur.json")
+FX_URL = "https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR"  # ECB reference rate
+FX_EVERY_S, FX_RETRY_S = 6 * 3600, 600
+FX_FALLBACK = 0.9  # until a rate was fetched once
+_fx = {"rate": None, "at": 0.0, "tried": 0.0, "busy": False}
+
+
+def fx_fetch():
+    """Fetches the ECB rate USD -> EUR and caches it; True on success."""
+    try:
+        rate = float(http_util.request_json(FX_URL, timeout=15)["rates"]["EUR"])
+        if not 0.1 < rate < 10:
+            return False
+        _fx.update(rate=rate, at=time.time())
+        fsutil.write_json_atomic(FX_FILE, {"rate": rate, "at": _fx["at"]})
+        return True
+    except (http_util.HttpError, KeyError, TypeError, ValueError, OSError):
+        return False
+
+
+def usd_eur():
+    """Euros per US dollar: the cached ECB rate (read from the data dir on the first call), refreshed in the background
+    every 6 h (a failed fetch is retried after 10 min; until then the last rate or a fallback is used)."""
+    now = time.time()
+    if _fx["rate"] is None:
+        try:
+            with open(FX_FILE, encoding="utf-8") as f:
+                cached = json.load(f)
+            _fx.update(rate=float(cached["rate"]), at=float(cached["at"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            _fx["rate"] = FX_FALLBACK
+    if now - _fx["at"] >= FX_EVERY_S and now - _fx["tried"] >= FX_RETRY_S and not _fx["busy"]:
+        _fx.update(busy=True, tried=now)
+
+        def work():
+            try:
+                fx_fetch()
+            finally:
+                _fx["busy"] = False
+        threading.Thread(target=work, daemon=True).start()
+    return _fx["rate"]
 
 
 def quota_moved(pts, usage, now, window_s=24 * 3600):

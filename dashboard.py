@@ -35,7 +35,7 @@ import http_util, logutil  # noqa: E402
 from PIL import ImageTk  # noqa: E402
 from live_tokens import LiveTokens, PROVIDERS, KEEP_S as LIVE_KEEP_S  # noqa: E402
 from live_chart import draw_live, fmt_rate, PLOT_L, PLOT_R  # noqa: E402
-from dashboard_data import (LAST, history, past_resets, throughput, kick_token_dump, tokens_between, fmt_tok, fmt_cents, ago, when,  # noqa: E402
+from dashboard_data import (LAST, history, past_resets, throughput, kick_token_dump, tokens_between, fmt_tok, fmt_cents, usd_eur, ago, when,  # noqa: E402
                             claude_cli_found, last_governor_error, fault_reason, claude_login, tray_state,
                             quota_history, quota_moved, COPILOT_HIST, OPENROUTER_HIST, pct_text, copilot_login, openrouter_key,
                             quota_spark)
@@ -683,20 +683,18 @@ class Dashboard:
     COST_PROVIDERS = {"live": PROVIDERS, "5h": ("claude",), "7d": ("claude",), "cop": ("copilot",), "or": ("openrouter",)}
 
     def update_cost(self):
-        """Spend rate under the big number: US cents per second over the last minute, for the providers of the shown tab
-        (omp replies only). OpenRouter's is real money; Claude and Copilot are flat plans, their rate is the API
-        list-price equivalent and is marked with an approximately sign."""
+        """Spend rate under the big number: euro cents per second over the last minute, for the providers of the shown
+        tab (omp replies only, priced in USD and converted at the ECB rate)."""
         provs = self.COST_PROVIDERS.get(self.sel)
         if not provs:
             return
-        prefix = "" if provs == ("openrouter",) else "\u2248 "
-        self.cost.config(text=f"{prefix}{fmt_cents(self.live.cents_per_s(provs))} \u00a2/s")
+        self.cost.config(text=f"{fmt_cents(self.live.cents_per_s(provs) * usd_eur())} ct/s")
 
     def cost_tip(self):
         if self.COST_PROVIDERS.get(self.sel) == ("openrouter",):
-            return "Spend over the last minute, in US cents per second\nOpenRouter's own prices, omp replies only"
-        return ("Spend over the last minute, in US cents per second\nat API list prices: Claude and Copilot are flat plans,\n"
-                "only OpenRouter is billed per use. omp replies only")
+            return "Spend over the last minute, in euro cents per second\nOpenRouter's own prices (USD at the ECB rate), omp replies only"
+        return ("Spend over the last minute, in euro cents per second\nat API list prices (USD at the ECB rate):\n"
+                "Claude and Copilot are flat plans, only OpenRouter is billed per use.\nomp replies only")
 
     def live_tick(self):
         """About 8 times a second while the Live tab is shown, so the chart slides smoothly (the rest renders every 5 s);
