@@ -35,7 +35,7 @@ import http_util, logutil  # noqa: E402
 from PIL import ImageTk  # noqa: E402
 from live_tokens import LiveTokens, PROVIDERS, KEEP_S as LIVE_KEEP_S  # noqa: E402
 from live_chart import draw_live, fmt_rate, PLOT_L, PLOT_R  # noqa: E402
-from dashboard_data import (LAST, history, past_resets, throughput, kick_token_dump, tokens_between, fmt_tok, ago, when,  # noqa: E402
+from dashboard_data import (LAST, history, past_resets, throughput, kick_token_dump, tokens_between, fmt_tok, fmt_cents, ago, when,  # noqa: E402
                             claude_cli_found, last_governor_error, fault_reason, claude_login, tray_state,
                             quota_history, quota_moved, COPILOT_HIST, OPENROUTER_HIST, pct_text, copilot_login, openrouter_key,
                             quota_spark)
@@ -142,6 +142,10 @@ class Dashboard:
         self.big.pack(anchor="e")
         self.sub = tk.Label(self.big_box, text=" ", bg=PANEL, fg=GOOD, font=("Segoe UI", 9), anchor="e")  # a blank keeps its row
         self.sub.pack(anchor="e")
+        self.cost = tk.Label(self.big_box, text=" ", bg=PANEL, fg=MUTED, font=("Segoe UI", 9), anchor="e")  # spend rate under the countdown
+        self.cost.pack(anchor="e")
+        self.cost.bind("<Enter>", lambda e: self.show_tip(e, self.cost_tip()))
+        self.cost.bind("<Leave>", self.hide_tip)
         self.chart = tk.Canvas(pace, width=1, height=CHART_MIN_H, bg=PANEL, highlightthickness=0)
         self.chart_args = None
         self.zoom, self.plot_x = None, (0, 1)  # visible share (lo, hi) of the time axis, plot edges (px)
@@ -676,6 +680,24 @@ class Dashboard:
             self.zoom_btn.lift()
             self.zoom_pos = pos
 
+    COST_PROVIDERS = {"live": PROVIDERS, "5h": ("claude",), "7d": ("claude",), "cop": ("copilot",), "or": ("openrouter",)}
+
+    def update_cost(self):
+        """Spend rate under the big number: US cents per second over the last minute, for the providers of the shown tab
+        (omp replies only). OpenRouter's is real money; Claude and Copilot are flat plans, their rate is the API
+        list-price equivalent and is marked with an approximately sign."""
+        provs = self.COST_PROVIDERS.get(self.sel)
+        if not provs:
+            return
+        prefix = "" if provs == ("openrouter",) else "\u2248 "
+        self.cost.config(text=f"{prefix}{fmt_cents(self.live.cents_per_s(provs))} \u00a2/s")
+
+    def cost_tip(self):
+        if self.COST_PROVIDERS.get(self.sel) == ("openrouter",):
+            return "Spend over the last minute, in US cents per second\nOpenRouter's own prices, omp replies only"
+        return ("Spend over the last minute, in US cents per second\nat API list prices: Claude and Copilot are flat plans,\n"
+                "only OpenRouter is billed per use. omp replies only")
+
     def live_tick(self):
         """About 8 times a second while the Live tab is shown, so the chart slides smoothly (the rest renders every 5 s);
         the tab's number is updated once a second."""
@@ -684,6 +706,7 @@ class Dashboard:
             if self.live_n % 8 == 0 or self.sel != "live":
                 text, color, spark = self.live_tab()
                 self.tabs["live"].set(text, color, self.sel == "live", spark)
+                self.update_cost()
             if self.sel == "live":
                 self.live_frame()
         except Exception:
@@ -1302,6 +1325,7 @@ class Dashboard:
             self.draw_pace(sel, idx, usage, u.get(rk), p, thr, hist, vcolor, now)
         resets = {"5h": u.get("resets5"), "7d": u.get("resets7"), "cop": cp_reset, "or": or_reset}
         self.sub.config(text=countdown_text(resets.get(sel)) or " ")
+        self.update_cost()
 
         # throughput
         for key, idx, win in (("Throughput 5h", 1, "5h"), ("Throughput 7d", 2, "7d")):

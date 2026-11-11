@@ -21,6 +21,7 @@ from paperclip_common import CFG, URL, read_settings, paperclip_enabled
 
 RUN_LOGS = CFG["runLogs"]   # detected UNC path of the WSL run-logs dir (None without Paperclip in WSL)
 PROVIDERS = ("claude", "copilot", "openrouter")
+OMP_PROVIDERS = {"anthropic": "claude", "github-copilot": "copilot", "openrouter": "openrouter"}  # omp's provider names
 KEEP_S = 24 * 60 * 60  # events older than this are dropped (the longest chart range)
 ACTIVE_S = 24 * 60 * 60  # a log file that was not written for this long is no longer followed
 POLL_S = 2              # followed files are read this often
@@ -91,7 +92,7 @@ def transcript_tokens(kind, rec, state):
     if kind == "omp":
         if rec.get("type") != "message" or m.get("role") != "assistant" or not m.get("usage"):
             return None
-        provider = {"anthropic": "claude", "github-copilot": "copilot", "openrouter": "openrouter"}.get(m.get("provider"))
+        provider = OMP_PROVIDERS.get(m.get("provider"))
         u = m["usage"]
         prompt = int(u.get("input") or 0) + int(u.get("cacheWrite") or 0)
         out = int(u.get("output") or 0)
@@ -117,6 +118,20 @@ def transcript_tokens(kind, rec, state):
     return [(rec["timestamp"], provider, n, r, p, family(m.get("model")))]
 
 
+def transcript_cost(kind, rec):
+    """(timestamp, provider, USD) of one omp reply that reports its price (usage.cost.total), else None. omp prices every
+    reply from the model's list price: real money for OpenRouter, an API-equivalent estimate for Claude and Copilot (flat
+    subscriptions). Claude Code transcripts and the Paperclip run streams carry no cost."""
+    m = rec.get("message") or {}
+    if kind != "omp" or rec.get("type") != "message" or m.get("role") != "assistant":
+        return None
+    provider = OMP_PROVIDERS.get(m.get("provider"))
+    cost = ((m.get("usage") or {}).get("cost") or {}).get("total")
+    if not provider or not isinstance(cost, (int, float)) or isinstance(cost, bool) or cost <= 0:
+        return None
+    return rec["timestamp"], provider, float(cost)
+
+
 def event_tokens(provider, ev, state):
     """Tokens this event adds: the growth of the run's context since the previous reading. The first reading of a run
     is only the baseline (system prompt, instructions, resumed history, mostly cache reads) and counts nothing.
@@ -135,6 +150,7 @@ class LiveTokens:
     def __init__(self):
         self.lock = threading.Lock()
         self.events = deque()   # (epoch, provider, tokens, cache read, prompt, model family)
+        self.costs = deque()    # (epoch, provider, USD) of every omp reply that reports its price
         self.agents = {}        # agent id -> (provider, model family)
         self.files = {}         # path -> {"kind", "provider", "family", "offset", "state", "mtime"}
         self.error = None       # last problem worth showing (logs unreachable ...)
@@ -217,7 +233,7 @@ class LiveTokens:
                 del self.files[path]
 
     def _ingest(self, fs, lines):
-        out = []
+        out, spent = [], []
         for ln in lines:
             try:
                 rec = json.loads(ln)
@@ -228,14 +244,18 @@ class LiveTokens:
                                                     fs["family"])]
                 else:
                     got = transcript_tokens(fs["kind"], rec, fs["state"])
+                    c = transcript_cost(fs["kind"], rec)
+                    if c:
+                        spent.append((datetime.fromisoformat(c[0].replace("Z", "+00:00")).timestamp(), c[1], c[2]))
                 for ts, provider, n, read, prompt, fam in got or ():
                     if n or read:
                         out.append((datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp(), provider, n, read, prompt, fam))
             except (ValueError, KeyError, TypeError, AttributeError):
                 continue
-        if out:
+        if out or spent:
             with self.lock:
                 self.events.extend(out)
+                self.costs.extend(spent)
 
     def _loop(self):
         while True:
@@ -262,6 +282,7 @@ class LiveTokens:
             self.error = problems[0] if problems else None
             with self.lock:
                 self.events = deque(e for e in self.events if e[0] >= now - KEEP_S)  # backfilled files arrive unordered
+                self.costs = deque(c for c in self.costs if c[0] >= now - KEEP_S)
             time.sleep(POLL_S)
 
     # ---- queries
@@ -306,6 +327,13 @@ class LiveTokens:
         now = time.time()
         with self.lock:
             return sum(e[2] for e in self.events if e[1] == provider and e[0] > now - avg_s) * 60.0 / avg_s
+
+    def cents_per_s(self, providers=PROVIDERS, window_s=60, now=None):
+        """Spend in US cents per second of `providers` over the trailing window_s seconds (omp replies only)."""
+        now = now or time.time()
+        with self.lock:
+            usd = sum(c[2] for c in self.costs if c[1] in providers and now - window_s < c[0] <= now)
+        return usd * 100.0 / window_s
 
     def active(self, provider, window_s=24 * 3600):
         """True if the provider consumed tokens within the last window_s seconds."""

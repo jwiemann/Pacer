@@ -212,6 +212,13 @@ def pct_text(v):
     return f"{v:.1f}%" if v < 10 else f"{v:.0f}%"
 
 
+def fmt_cents(v):
+    """US cents per second with enough digits to read small rates: 0 -> '0', 0.0237 -> '0.024', 1.4 -> '1.40'."""
+    if v <= 0:
+        return "0"
+    return f"{v:.2f}" if v >= 1 else f"{v:.3f}" if v >= 0.01 else f"{v:.4f}"
+
+
 def quota_moved(pts, usage, now, window_s=24 * 3600):
     """True if a quota's usage changed within the last window_s seconds: `pts` [(epoch, %)] readings (the newest one
     older than the window is the starting value) plus the current `usage` (None = no reading, never moved)."""

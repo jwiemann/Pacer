@@ -30,6 +30,10 @@ def set_lang(lang):
 EXACT = {
     # panels, tabs, rows
     "Status": "Status", "Services": "Dienste", "Settings": "Einstellungen", "Month": "Monat",
+    "Spend over the last minute, in US cents per second": "Ausgaben der letzten Minute in US-Cent pro Sekunde",
+    "OpenRouter's own prices, omp replies only": "Originalpreise von OpenRouter, nur omp-Antworten",
+    "at API list prices: Claude and Copilot are flat plans,": "zu API-Listenpreisen: Claude und Copilot sind Pauschalen,",
+    "only OpenRouter is billed per use. omp replies only": "nur OpenRouter wird je Nutzung abgerechnet. Nur omp-Antworten",
     "Claude login": "Claude-Login", "Copilot login": "Copilot-Login",
     "Throughput 5h": "Durchsatz 5h", "Throughput 7d": "Durchsatz 7d", "Copilot usage": "Copilot-Nutzung",
     "Resets 5h": "Reset 5h", "Resets 7d": "Reset 7d", "Copilot resets": "Copilot-Reset",

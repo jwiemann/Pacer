@@ -56,3 +56,29 @@ def test_a_burst_ramps_in_and_out_instead_of_stepping():
     values = live.series(window_s=300, step_s=1, avg_s=30, now=now)["claude"]
     steps = [abs(b - a) for a, b in zip(values, values[1:])]
     assert max(steps) <= max(values) / 6 + 1e-6  # RAMP_STEPS sub-steps: never the whole height at once
+
+
+def omp_reply(provider, total):
+    return {"type": "message", "id": "m1", "timestamp": "2026-11-11T08:00:00Z",
+            "message": {"role": "assistant", "provider": provider, "model": "x/y",
+                        "usage": {"input": 10, "output": 5, "cost": {"total": total}}}}
+
+
+@pytest.mark.parametrize(("provider", "name"), [("openrouter", "openrouter"), ("anthropic", "claude"), ("github-copilot", "copilot")])
+def test_omp_reply_price_is_attributed_to_its_provider(provider, name):
+    ts, who, usd = live_tokens.transcript_cost("omp", omp_reply(provider, 0.0024))
+    assert (ts, who, usd) == ("2026-11-11T08:00:00Z", name, 0.0024)
+
+
+def test_replies_without_a_price_carry_no_cost():
+    assert live_tokens.transcript_cost("omp", omp_reply("openrouter", 0)) is None
+    assert live_tokens.transcript_cost("omp", omp_reply("some-other", 0.5)) is None
+    assert live_tokens.transcript_cost("claudecode", {"type": "assistant", "message": {"usage": {"input_tokens": 5}}}) is None
+
+
+def test_cents_per_second_counts_the_providers_asked_for_in_the_trailing_window():
+    live, now = LiveTokens(), 1_000_000.0
+    live.costs.extend([(now - 30, "openrouter", 0.012), (now - 10, "openrouter", 0.018),
+                       (now - 20, "claude", 1.0), (now - 90, "openrouter", 5.0)])  # claude: other provider; 90 s: too old
+    assert live.cents_per_s(("openrouter",), window_s=60, now=now) == pytest.approx(0.03 * 100 / 60)
+    assert live.cents_per_s(("claude", "openrouter"), window_s=60, now=now) == pytest.approx(1.03 * 100 / 60)
