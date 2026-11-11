@@ -59,24 +59,27 @@ def corner_images(r, outer, fill, border):
 _corners = {}  # (r, outer, fill, border) -> the four PhotoImages (kept alive here)
 
 
-def round_corners(widget, r, outer, fill, border):
-    """Rounds the corners of a square Frame-like widget (Tk cannot clip widgets): four small corner images are placed over
-    its corners. `outer` = colour behind the widget. Returns repaint(fill=None, border=None, outer=None) for widgets that
-    change colour (hover, selected)."""
+def round_corners(widget, r, outer, fill, border, which=(True, True, True, True)):
+    """Rounds the corners of a square Frame-like widget (Tk cannot clip widgets): small corner images are placed over its
+    corners. `outer` = colour behind the widget; `which` picks the corners (top left, top right, bottom left, bottom
+    right) that are rounded, e.g. a combo button keeps its joint square. Returns repaint(fill=None, border=None,
+    outer=None) for widgets that change colour (hover, selected)."""
     state = {"outer": outer, "fill": fill, "border": border}
     labels = []
-    for kw in (dict(x=0, y=0, anchor="nw"), dict(relx=1.0, x=0, y=0, anchor="ne"),
-               dict(x=0, rely=1.0, y=0, anchor="sw"), dict(relx=1.0, rely=1.0, x=0, y=0, anchor="se")):
-        lb = tk.Label(widget, bd=0, highlightthickness=0, padx=0, pady=0)
-        lb.place(bordermode="outside", **kw)
-        labels.append(lb)
+    places = (dict(x=0, y=0, anchor="nw"), dict(relx=1.0, x=0, y=0, anchor="ne"),
+              dict(x=0, rely=1.0, y=0, anchor="sw"), dict(relx=1.0, rely=1.0, x=0, y=0, anchor="se"))
+    for i, kw in enumerate(places):
+        if which[i]:
+            lb = tk.Label(widget, bd=0, highlightthickness=0, padx=0, pady=0)
+            lb.place(bordermode="outside", **kw)
+            labels.append((i, lb))
 
     def paint():
         key = (r, state["outer"], state["fill"], state["border"])
         if key not in _corners:
             _corners[key] = [ImageTk.PhotoImage(im) for im in corner_images(*key)]
-        for lb, im in zip(labels, _corners[key]):
-            lb.config(image=im, bg=state["outer"])
+        for i, lb in labels:
+            lb.config(image=_corners[key][i], bg=state["outer"])
 
     def repaint(fill=None, border=None, outer=None):
         new = {"fill": fill or state["fill"], "border": border or state["border"], "outer": outer or state["outer"]}
@@ -87,7 +90,7 @@ def round_corners(widget, r, outer, fill, border):
     return repaint
 
 
-def button(parent, text, cmd, primary=False, icon=None, pad=(12, 7)):
+def button(parent, text, cmd, primary=False, icon=None, pad=(12, 7), corners=(True, True, True, True)):
     """Flat dark button with hover state and optional Segoe MDL2 icon (tk.Button ignores the dark theme).
     set_icon_only(True) hides the text (narrow window); `label()` is the text it would show, for a tooltip."""
     base, hover = ("#2f6fe0", "#4580f0") if primary else (BTN, BTN_HOVER)
@@ -102,7 +105,7 @@ def button(parent, text, cmd, primary=False, icon=None, pad=(12, 7)):
     parts.append(tk.Label(inner, text=text, bg=base, fg=fg, font=mono(9)))
     parts[-1].pack(side="left")
     allw = [f] + parts
-    rc = round_corners(f, 6, parent.cget("bg"), base, base)  # rounded; the corners follow the hover colour
+    rc = round_corners(f, 6, parent.cget("bg"), base, base, corners)  # rounded; the corners follow the hover colour
 
     col = {"base": base, "hover": hover}
 
@@ -142,10 +145,10 @@ def split_button(parent, text, cmd, on_menu, icon=None):
     """Combo button: the main part runs `cmd`, the narrow arrow part on its right runs `on_menu` (opens a menu). Offers the
     same interface as button(): set_state, set_icon_only (main part only), label, parts."""
     f = tk.Frame(parent, bg=BG)
-    main = button(f, text, cmd, icon=icon)
+    main = button(f, text, cmd, icon=icon, corners=(True, False, True, False))  # only the outer corners are rounded: the joint stays square
     main.pack(side="left", fill="both", expand=True)
     tk.Frame(f, bg=BG, width=1).pack(side="left", fill="y")
-    arrow = button(f, "\u25be", on_menu, pad=(9, 7))
+    arrow = button(f, "\u25be", on_menu, pad=(9, 7), corners=(False, True, False, True))
     arrow.pack(side="left", fill="y")
     f.set_state, f.set_icon_only, f.label = main.set_state, main.set_icon_only, main.label
     f.parts = main.parts + arrow.parts
