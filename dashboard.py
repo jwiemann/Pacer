@@ -1094,12 +1094,12 @@ class Dashboard:
         if self.compact and not self.tabs_only:
             tabs = [self.tabs[win] for _hdr, wins in shown for win in wins]
             for i, tab in enumerate(tabs):
-                tab.frame.pack(side="left", fill="both", expand=True, padx=(0, 0 if i == len(tabs) - 1 else 2))
+                tab.frame.pack(side="left", fill="both", expand=True, padx=(0, 0 if i == len(tabs) - 1 else 4))
             return
         for hdr, wins in shown:
-            hdr.pack(fill="x", pady=0)
+            hdr.pack(fill="x", pady=(0, 2))
             for i, win in enumerate(wins):
-                self.tabs[win].frame.pack(fill="x", pady=(0, 4 if i == len(wins) - 1 else 1))
+                self.tabs[win].frame.pack(fill="x", pady=(0, 10 if i == len(wins) - 1 else 4))
         if self.tabs_only:
             self.fit_tabs_only()
 
