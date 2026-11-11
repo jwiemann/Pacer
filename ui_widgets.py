@@ -217,14 +217,14 @@ class Tab:
             self.name.grid(row=0, column=1, sticky="w", padx=(2, 0))
             self.use.grid(row=1, column=0, columnspan=2, sticky="w")
         else:
-            self.inner.config(padx=4, pady=2)
+            self.inner.config(padx=0, pady=0)  # the graph touches the tab's border
             self.dot.config(font=("Segoe UI", 9))
             self.name.config(width=6, font=("Segoe UI", 10, "bold"))  # same width in every tab: equal graphs
             self.use.config(width=6, anchor="e", font=("Segoe UI", 10))
-            self.dot.grid(row=0, column=0)
+            self.dot.grid(row=0, column=0, padx=(4, 0))
             self.name.grid(row=0, column=1, padx=(3, 3))
-            self.spark.grid(row=0, column=2, sticky="ew", padx=(0, 2))  # takes whatever width the tab has left
-            self.use.grid(row=0, column=3)
+            self.spark.grid(row=0, column=2, sticky="nsew")  # takes the width left and the whole tab height
+            self.use.grid(row=0, column=3, padx=(3, 4))
 
     def set(self, usage, color, selected, spark=None, paused=False):
         """spark: (points, top) with points [(x 0..1, value)] drawn like a Task Manager graph (value 0..top), or None.
@@ -244,14 +244,14 @@ class Tab:
         c.delete("all")
         if w < 10:  # not laid out yet; <Configure> redraws
             return
-        c.create_rectangle(0, 0, w - 1, h - 1, outline=GRID)
         if not spark or len(spark[0]) < 2 or spark[1] <= 0:
             return
         pts, top = spark
-        # Tk leaves out the last pixel column / row of a polygon and of a line's end: run one pixel further to reach the 1 px frame
-        xy = [(1 + x * (w - 2), (h - 2) - min(max(v / top, 0), 1) * (h - 3)) for x, v in pts]  # inside the frame, edge to edge
+        # no outline of its own: the tab's 1 px border is the frame, so the graph runs edge to edge. Tk leaves out the last
+        # pixel column / row of a polygon and of a line's end: run one pixel further
+        xy = [(x * w, (h - 1) - min(max(v / top, 0), 1) * (h - 1)) for x, v in pts]
         flat = [q for p in xy for q in p]
-        c.create_polygon(xy[0][0], h - 1, *flat, xy[-1][0], h - 1, fill=AREA, outline="")
+        c.create_polygon(xy[0][0], h, *flat, xy[-1][0], h, fill=AREA, outline="")
         c.create_line(*flat, fill=color)
 
 

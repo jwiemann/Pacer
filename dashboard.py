@@ -90,11 +90,7 @@ class Dashboard:
         root.title(TITLE)
         root.configure(bg=BG)
         root.resizable(True, True)
-        try:  # dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE)
-            root.update_idletasks()
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(_u32.GetParent(root.winfo_id()), 20, ctypes.byref(ctypes.c_int(1)), 4)
-        except Exception:
-            pass
+        self.dark_titlebar()
         self.pinned = self.saved_choice("pinnedTab", ("live", "5h", "7d", "cop", "or"))  # tab picked by the user (remembered); None = follow the limiting window
         self.upd_busy = False  # paperclipai update check running in a worker thread
         self._job = None    # pending refresh timer
@@ -341,7 +337,7 @@ class Dashboard:
         self.normal_size = (w, h)
         if read_settings().get("tabsOnly"):  # reopened as the tab column
             self.tabs_only = True
-            root.resizable(True, False)
+            self.set_resizable(True, False)
             self.apply_layout()
             w, h = self.tabs_size(read_settings().get("tabsOnlyWidth"))
         pos = saved_position(w, h)
@@ -487,7 +483,7 @@ class Dashboard:
             self.normal_size = (root.winfo_width(), root.winfo_height())
         self.tabs_only = on
         write_settings(tabsOnly=on)
-        root.resizable(True, not on)
+        self.set_resizable(True, not on)
         if on:
             self.apply_layout()
             w, h = self.tabs_size(read_settings().get("tabsOnlyWidth"))  # the tabs' own width unless widened before
@@ -545,6 +541,19 @@ class Dashboard:
         self.details = self.details_pref()
         self.apply_layout()
         self.fit_minsize()
+
+    def dark_titlebar(self):
+        """Dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE). Tk builds a new native frame window whenever the window style
+        changes (resizable() ...), which drops the attribute: call this after every such change."""
+        try:
+            self.root.update_idletasks()
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(_u32.GetParent(self.root.winfo_id()), 20, ctypes.byref(ctypes.c_int(1)), 4)
+        except Exception:
+            pass
+
+    def set_resizable(self, width, height):
+        self.root.resizable(width, height)
+        self.dark_titlebar()
 
     def set_height(self, h, width=None):
         """Resize the window to height h (width kept, or `width`), moved up when it would reach below the screen."""
