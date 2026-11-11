@@ -52,6 +52,9 @@ def test_without_cache_the_fallback_serves_until_a_fetch_succeeded(monkeypatch):
     assert dd.usd_eur() == dd.FX_FALLBACK and len(started) == 1  # ...and is not started twice while busy or within the retry pause
 
 
-@pytest.mark.parametrize(("cents", "text"), [(0, "0.00"), (-1e-9, "0.00"), (0.004, "0.00"), (0.0237, "0.02"), (0.692, "0.69"), (1.4, "1.40"), (12.346, "12.35")])
-def test_spend_rate_shows_two_places_after_the_dot(cents, text):
-    assert dd.fmt_cents(cents) == text
+@pytest.mark.parametrize(("cents", "text"), [
+    (0, ""), (-1e-9, ""), (0.004, ""), (0.0049, ""),                      # rounds to zero: hidden
+    (0.005, "0.01 ct/s"), (0.0237, "0.02 ct/s"), (0.692, "0.69 ct/s"), (1.4, "1.40 ct/s"), (99.99, "99.99 ct/s"),
+    (99.996, "1.00 \u20ac/s"), (100, "1.00 \u20ac/s"), (125.4, "1.25 \u20ac/s"), (1234.5, "12.35 \u20ac/s")])  # from 1 EUR/s: euros
+def test_spend_rate_label(cents, text):
+    assert dd.fmt_spend(cents) == text

@@ -212,9 +212,13 @@ def pct_text(v):
     return f"{v:.1f}%" if v < 10 else f"{v:.0f}%"
 
 
-def fmt_cents(v):
-    """Euro cents per second with two places after the dot: 0.0237 -> '0.02', 1.4 -> '1.40'."""
-    return f"{max(v, 0.0):.2f}"
+def fmt_spend(cents):
+    """Spend rate label from euro cents per second: two places after the dot, in euros from 1 EUR/s on ('1.25 €/s'),
+    '' while it rounds to zero (nothing worth showing)."""
+    c = round(max(cents, 0.0), 2)
+    if c <= 0:
+        return ""
+    return f"{c / 100:.2f} \u20ac/s" if c >= 100 else f"{c:.2f} ct/s"
 
 
 FX_FILE = os.path.join(DIR, "fx-usd-eur.json")

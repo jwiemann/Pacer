@@ -35,7 +35,7 @@ import http_util, logutil  # noqa: E402
 from PIL import ImageTk  # noqa: E402
 from live_tokens import LiveTokens, PROVIDERS, KEEP_S as LIVE_KEEP_S  # noqa: E402
 from live_chart import draw_live, fmt_rate, PLOT_L, PLOT_R  # noqa: E402
-from dashboard_data import (LAST, history, past_resets, throughput, kick_token_dump, tokens_between, fmt_tok, fmt_cents, usd_eur, ago, when,  # noqa: E402
+from dashboard_data import (LAST, history, past_resets, throughput, kick_token_dump, tokens_between, fmt_tok, fmt_spend, usd_eur, ago, when,  # noqa: E402
                             claude_cli_found, last_governor_error, fault_reason, claude_login, tray_state,
                             quota_history, quota_moved, COPILOT_HIST, OPENROUTER_HIST, pct_text, copilot_login, openrouter_key,
                             quota_spark)
@@ -138,13 +138,13 @@ class Dashboard:
             self.groups.append((title, hdr, [w for w, _l in wins]))
         self.place_side()
 
-        self.big_box = tk.Frame(pace, bg=PANEL)  # the big percentage with the reset countdown below it
-        self.big = tk.Label(self.big_box, bg=PANEL, fg=FG, font=("Segoe UI", 26, "bold"), width=5, anchor="e")
+        self.big_box = tk.Frame(pace, bg=PANEL)  # the big percentage, the spend rate and the reset countdown below it
+        self.big = tk.Label(self.big_box, bg=PANEL, fg=FG, font=("Segoe UI", 26, "bold"), width=5, anchor="e", pady=0)
         self.big.pack(anchor="e")
+        self.cost = tk.Label(self.big_box, text=" ", bg=PANEL, fg=MUTED, font=("Segoe UI", 9), anchor="e", pady=0)  # spend rate, blank while zero
+        self.cost.pack(anchor="e")
         self.sub = tk.Label(self.big_box, text=" ", bg=PANEL, fg=GOOD, font=("Segoe UI", 9), anchor="e")  # a blank keeps its row
         self.sub.pack(anchor="e")
-        self.cost = tk.Label(self.big_box, text=" ", bg=PANEL, fg=MUTED, font=("Segoe UI", 9), anchor="e")  # spend rate under the countdown
-        self.cost.pack(anchor="e")
         self.cost.bind("<Enter>", lambda e: self.show_tip(e, self.cost_tip()))
         self.cost.bind("<Leave>", self.hide_tip)
         self.chart = tk.Canvas(pace, width=1, height=CHART_MIN_H, bg=PANEL, highlightthickness=0)
@@ -706,17 +706,21 @@ class Dashboard:
     COST_PROVIDERS = {"live": PROVIDERS, "5h": ("claude",), "7d": ("claude",), "cop": ("copilot",), "or": ("openrouter",)}
 
     def update_cost(self):
-        """Spend rate under the big number: euro cents per second over the last minute, for the providers of the shown
-        tab (omp replies only, priced in USD and converted at the ECB rate)."""
+        """Spend rate under the big number: euro cents (euros from 1 EUR) per second over the last minute, for the providers
+        of the shown tab (omp replies only, priced in USD and converted at the ECB rate). Blank while it is zero; the
+        label keeps its row, so the window never changes height."""
         provs = self.COST_PROVIDERS.get(self.sel)
         if not provs:
             return
-        self.cost.config(text=f"{fmt_cents(self.live.cents_per_s(provs) * usd_eur())} ct/s")
+        self.cost.config(text=fmt_spend(self.live.cents_per_s(provs) * usd_eur()) or " ")
 
     def cost_tip(self):
+        if not self.cost.cget("text").strip():  # nothing shown, nothing to explain
+            return ""
+        head = "Spend over the last minute, per second, in euro cents (euros from 1 \u20ac)"
         if self.COST_PROVIDERS.get(self.sel) == ("openrouter",):
-            return "Spend over the last minute, in euro cents per second\nOpenRouter's own prices (USD at the ECB rate), omp replies only"
-        return ("Spend over the last minute, in euro cents per second\nat API list prices (USD at the ECB rate):\n"
+            return head + "\nOpenRouter's own prices (USD at the ECB rate), omp replies only"
+        return (head + "\nat API list prices (USD at the ECB rate):\n"
                 "Claude and Copilot are flat plans, only OpenRouter is billed per use.\nomp replies only")
 
     def live_tick(self):
