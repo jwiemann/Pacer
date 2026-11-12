@@ -798,18 +798,18 @@ class Dashboard:
     COST_PROVIDERS = {"live": PROVIDERS, "5h": ("claude",), "7d": ("claude",), "cop": ("copilot",), "or": ("openrouter",)}
 
     def update_cost(self):
-        """Spend rate under the big number: euro cents (euros from 1 EUR) per second over the last minute, for the providers
+        """Spend rate under the big number: euro cents (euros from 1 EUR) per minute over the last minute, for the providers
         of the shown tab (omp replies and Paperclip's OpenCode agents, priced in USD and converted at the ECB rate). Blank while it is zero; the
         label keeps its row, so the window never changes height."""
         provs = self.COST_PROVIDERS.get(self.sel)
         if not provs:
             return
-        self.cost.config(text=fmt_spend(self.live.cents_per_s(provs) * usd_eur()) or " ")
+        self.cost.config(text=fmt_spend(self.live.cents_per_s(provs) * 60 * usd_eur()) or " ")
 
     def cost_tip(self):
         if not self.cost.cget("text").strip():  # nothing shown, nothing to explain
             return ""
-        head = "Spend over the last minute, per second, in euro cents (euros from 1 \u20ac)"
+        head = "Spend over the last minute, in euro cents (euros from 1 \u20ac)"
         if self.COST_PROVIDERS.get(self.sel) == ("openrouter",):
             return head + "\nOpenRouter's own prices (USD at the ECB rate): omp replies and OpenCode agents"
         return (head + "\nat API list prices (USD at the ECB rate):\n"
