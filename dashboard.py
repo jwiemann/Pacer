@@ -145,8 +145,6 @@ class Dashboard:
         self.cost.pack(anchor="e")
         self.sub = tk.Label(self.big_box, text=" ", bg=PANEL, fg=GOOD, font=mono(9), anchor="e")  # a blank keeps its row
         self.sub.pack(anchor="e")
-        self.cost.bind("<Enter>", lambda e: self.show_tip(e, self.cost_tip()))
-        self.cost.bind("<Leave>", self.hide_tip)
         self.chart = tk.Canvas(pace, width=1, height=CHART_MIN_H, bg=PANEL, highlightthickness=0)
         self.chart_args = None
         self.zoom, self.plot_x = None, (0, 1)  # visible share (lo, hi) of the time axis, plot edges (px)
@@ -805,15 +803,6 @@ class Dashboard:
         if not provs:
             return
         self.cost.config(text=fmt_spend(self.live.cents_per_s(provs) * 60 * usd_eur()) or " ")
-
-    def cost_tip(self):
-        if not self.cost.cget("text").strip():  # nothing shown, nothing to explain
-            return ""
-        head = "Spend over the last minute, in euro cents (euros from 1 \u20ac)"
-        if self.COST_PROVIDERS.get(self.sel) == ("openrouter",):
-            return head + "\nOpenRouter's own prices (USD at the ECB rate): omp replies and OpenCode agents"
-        return (head + "\nat API list prices (USD at the ECB rate):\n"
-                "Claude and Copilot are flat plans, only OpenRouter is billed per use.\nomp replies and OpenCode agents only")
 
     def live_tick(self):
         """About 8 times a second while the Live tab is shown, so the chart slides smoothly (the rest renders every 5 s);
