@@ -12,6 +12,7 @@ BG, PANEL, FG, MUTED = "#1b1d21", "#24272d", "#e6e6e6", "#8d96a3"
 INPUT, BTN, BTN_HOVER, BORDER = "#15171a", "#30343c", "#3d424c", "#3a3f48"
 GOOD, WARN, BAD, BLUE = "#2eb85c", "#f0a020", "#e13232", "#5a9bff"
 AREA, GRID, TAB_ON = "#2c374a", "#34383f", "#2c3340"
+SPARK_BG = "#1f2227"  # plot field of the tab graphs: a step darker than PANEL, not black
 VIOLET = "#b07cff"
 HEX = {"good": GOOD, "warn": WARN, "bad": BAD, "blue": BLUE, "muted": MUTED}
 
@@ -311,7 +312,7 @@ class Tab:
         self.frame.config(bg=BLUE if selected else BORDER)
         self.round(fill=TAB_ON if selected else PANEL, border=BLUE if selected else BORDER)
         for w in self.parts:
-            w.config(bg=INPUT if w is self.spark else TAB_ON if selected else PANEL)  # the graph is a darker field: it shows where the window starts and ends
+            w.config(bg=SPARK_BG if w is self.spark else TAB_ON if selected else PANEL)  # the graph is a slightly darker field: it shows where the window starts and ends
         self.dot.config(fg=color, text="\u23f8" if paused else "\u25cf")
         self.name.config(fg=FG if selected else MUTED)
         self.use.config(text=usage, fg=FG if selected else MUTED)
