@@ -53,8 +53,8 @@ def test_without_cache_the_fallback_serves_until_a_fetch_succeeded(monkeypatch):
 
 
 @pytest.mark.parametrize(("cents", "text"), [
-    (0, ""), (-1e-9, ""), (0.004, ""), (0.0049, ""),                      # rounds to zero: hidden
-    (0.005, "0.01 ct/min"), (0.0237, "0.02 ct/min"), (0.692, "0.69 ct/min"), (1.4, "1.40 ct/min"), (99.99, "99.99 ct/min"),
-    (99.996, "1.00 \u20ac/min"), (100, "1.00 \u20ac/min"), (125.4, "1.25 \u20ac/min"), (1234.5, "12.35 \u20ac/min")])  # from 1 EUR/min: euros
+    (0, ""), (-1e-9, ""), (0.2, ""), (0.49, ""),                           # rounds to zero: hidden
+    (0.51, "1 ct/min"), (1.26, "1 ct/min"), (44.09, "44 ct/min"), (55.6, "56 ct/min"), (99.49, "99 ct/min"),
+    (99.6, "1.00 \u20ac/min"), (100, "1.00 \u20ac/min"), (125.4, "1.25 \u20ac/min"), (1234.5, "12.35 \u20ac/min")])  # from 1 EUR/min: euros
 def test_spend_rate_label(cents, text):
     assert dd.fmt_spend(cents) == text

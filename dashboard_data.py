@@ -213,12 +213,12 @@ def pct_text(v):
 
 
 def fmt_spend(cents):
-    """Spend rate label from euro cents per minute: two places after the dot, in euros from 1 EUR/min on ('1.25 €/min'),
-    '' while it rounds to zero (nothing worth showing)."""
-    c = round(max(cents, 0.0), 2)
+    """Spend rate label from euro cents per minute: whole cents ('44 ct/min'), in euros with two places after the dot
+    from 1 EUR/min on ('1.25 €/min'), '' while it rounds to zero (nothing worth showing)."""
+    c = round(max(cents, 0.0))
     if c <= 0:
         return ""
-    return f"{c / 100:.2f} \u20ac/min" if c >= 100 else f"{c:.2f} ct/min"
+    return f"{max(cents, 100.0) / 100:.2f} \u20ac/min" if c >= 100 else f"{c} ct/min"
 
 
 FX_FILE = os.path.join(DIR, "fx-usd-eur.json")
