@@ -629,9 +629,11 @@ class Dashboard:
     def live_frame(self):
         now = time.time()
         width = self.live_width
+        plot = max(self.chart.winfo_width() - PLOT_L - PLOT_R, 1)
         end = now if self.live_end is None else min(self.live_end, now)
+        end = math.floor(end * plot / width) * width / plot  # whole pixels on the time axis: every redraw moves the whole picture by full pixels, no point is rounded differently from frame to frame
         level = next((lv for lv in LIVE_LEVELS if lv[0] >= width), LIVE_LEVELS[-1])  # the finest data level that covers the span
-        px = (self.chart.winfo_width() - PLOT_L - PLOT_R) * level[1] / width  # pixels per data step
+        px = plot * level[1] / width  # pixels per data step
         series = self.live.series(width, level[1], level[2], now=end, sub=min(max(math.ceil(px / LIVE_CHORD_PX), 1), 16))
         layout = [x for x in LIVE_LAYOUT if (x[0] != "copilot" or self.cop_on or any(series["copilot"]))
                   and (x[0] != "openrouter" or self.or_on or any(series["openrouter"]))]
