@@ -120,13 +120,12 @@ def draw_live(c, series, layout, pal, chips, active, resets=(), cache=None, spli
     def flat(values):
         return [q for t, y in zip(times, values) for q in (X(t), Y(y))]
 
-    def area(values, fill, hatch=""):  # smooth like the line above it; doubled points keep the four corners sharp
+    def area(values, fill, hatch=""):
         p = flat(values)
-        c.create_polygon(p[0], yb, p[0], yb, *p[:2], *p, *p[-2:], p[-2], yb, p[-2], yb, fill=fill, outline="", smooth=True,
-                         stipple=hatch)
+        c.create_polygon(p[0], yb, *p, p[-2], yb, fill=fill, outline="", stipple=hatch)
 
-    def curve(values, colour, width):
-        c.create_line(*flat(values), fill=colour, width=width, joinstyle="round", capstyle="round", smooth=True)
+    def curve(values, colour, width):  # the series is the finished curve: Tk's own smoothing would reshape it at the edges
+        c.create_line(*flat(values), fill=colour, width=width, joinstyle="round", capstyle="round")
 
     bands = {}  # name -> [(family, hatch, stacked top values, current rate)], bottom band first
     shade = {name: (mix(pal["bg"], colour, 0.16), mix(pal["bg"], colour, 0.62)) for name, _label, colour in layout}  # band fill, hatch lines

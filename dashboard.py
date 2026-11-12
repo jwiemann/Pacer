@@ -62,8 +62,9 @@ PAPERCLIP_ROWS = ("Claude agents", "Copilot agents", "OpenRouter agents", "Watch
 LIVE_PAL = {"fg": FG, "muted": MUTED, "grid": GRID, "bg": PANEL,
            "tint": {"claude": AREA, "copilot": "#352e4a", "openrouter": "#2c4a45"}, "reset5h": WARN, "reset7d": GOOD}
 LIVE_LEVELS = ((60, 1, 5), (300, 5, 30), (3600, 30, 120), (6 * 3600, 120, 600), (24 * 3600, 300, 1800))  # window, point step, averaging (s)
-LIVE_CHIPS = {"5m": 300, "1h": 3600, "24h": 24 * 3600}  # presets; zoom reaches every width between 30 s and 24 h, the data level follows it
+LIVE_CHIPS = {"5m": 300, "1h": 3600, "24h": 24 * 3600}  # presets; zoom reaches every width between 30 s and 24 h (stopping on each preset), the data level follows it
 LIVE_MIN_S = 30
+LIVE_CHORD_PX = 3  # the Live curve is drawn as straight pieces about this long
 REFRESH_MS = 5000
 
 
@@ -632,13 +633,14 @@ class Dashboard:
         width = self.live_width
         end = now if self.live_end is None else min(self.live_end, now)
         level = next((lv for lv in LIVE_LEVELS if lv[0] >= width), LIVE_LEVELS[-1])  # the finest data level that covers the span
-        series = self.live.series(width, level[1], level[2], now=end)
+        px = (self.chart.winfo_width() - PLOT_L - PLOT_R) * level[1] / width  # pixels per data step
+        series = self.live.series(width, level[1], level[2], now=end, sub=min(max(math.ceil(px / LIVE_CHORD_PX), 1), 16))
         layout = [x for x in LIVE_LAYOUT if (x[0] != "copilot" or self.cop_on or any(series["copilot"]))
                   and (x[0] != "openrouter" or self.or_on or any(series["openrouter"]))]
         cache = {n: self.cache_text(n, width, end) for n, _l, _c in layout}
         self.big.config(text=fmt_rate(sum(series[x[0]][-1] for x in layout)))
         split = bool(self.split_var.get())
-        active = next((k for k, w in LIVE_CHIPS.items() if self.live_end is None and abs(w - width) < 1), None)
+        active = next((k for k, w in LIVE_CHIPS.items() if abs(w - width) < 1), None)  # the span counts, wherever it ends
         changed = self.live_end is not None or abs(width - LIVE_CHIPS[self.live_preset]) >= 1  # not the preset any more
         self.live_t0, self.live_t1 = series["t"][0], series["t"][-1]
         hover = None if self.hover_t is None else min(max(self.hover_t, self.live_t0), self.live_t1)
@@ -744,7 +746,10 @@ class Dashboard:
         cx = min(max((e.x_root - self.chart.winfo_rootx() - left) / max(right - left, 1), 0.0), 1.0)
         if self.sel == "live":
             end = time.time() if self.live_end is None else self.live_end
-            width = min(max(self.live_width * (0.8 if e.delta > 0 else 1.25), LIVE_MIN_S), LIVE_KEEP_S)
+            width = self.live_width * (0.8 if e.delta > 0 else 1.25)
+            lo, hi = sorted((self.live_width, width))
+            width = next((w for w in LIVE_CHIPS.values() if lo + 1 < w < hi - 1), width)  # a preset on the way: stop on it (its chip lights up)
+            width = min(max(width, LIVE_MIN_S), LIVE_KEEP_S)
             anchor = end - self.live_width * (1 - cx)  # the time under the pointer stays under it
             self.set_live_view(width, anchor + width * (1 - cx))
             return

@@ -22,8 +22,9 @@ from paperclip_common import CFG, URL, read_settings, paperclip_enabled
 RUN_LOGS = CFG["runLogs"]   # detected UNC path of the WSL run-logs dir (None without Paperclip in WSL)
 PROVIDERS = ("claude", "copilot", "openrouter")
 OMP_PROVIDERS = {"anthropic": "claude", "github-copilot": "copilot", "openrouter": "openrouter"}  # omp's provider names
-KEEP_S = 24 * 60 * 60  # events older than this are dropped (the longest chart range)
-ACTIVE_S = 24 * 60 * 60  # a log file that was not written for this long is no longer followed
+KEEP_S = 24 * 60 * 60  # the longest chart range
+LEAD_S = 60 * 60       # events stay this much longer: the averaged curve at the left edge of the longest range needs them
+ACTIVE_S = KEEP_S + LEAD_S  # a log file that was not written for this long is no longer followed
 POLL_S = 2              # followed files are read this often
 DISCOVER_S = 10         # the run-log directories are listed this often (a run starts a new file)
 AGENTS_S = 60           # agent -> provider mapping is refreshed this often
@@ -281,28 +282,37 @@ class LiveTokens:
             step("follow", self._follow, now)
             self.error = problems[0] if problems else None
             with self.lock:
-                self.events = deque(e for e in self.events if e[0] >= now - KEEP_S)  # backfilled files arrive unordered
+                self.events = deque(e for e in self.events if e[0] >= now - KEEP_S - LEAD_S)  # backfilled files arrive unordered
                 self.costs = deque(c for c in self.costs if c[0] >= now - KEEP_S)
             time.sleep(POLL_S)
 
     # ---- queries
-    def series(self, window_s=300, step_s=5, avg_s=30, now=None):
+    def series(self, window_s=300, step_s=5, avg_s=30, now=None, sub=1):
         """{"t": [epochs], provider: [tokens/min at each t], "models": {provider: {family: [tokens/min at each t]}}}
         for the window ending at `now`; a provider's curve is the sum of its model families (only families with tokens
-        in the window are listed). The curve is a trailing average over avg_s (events are per turn, single points would
+        in the window are listed). The rate is a trailing average over avg_s (events are per turn, single points would
         be spikes) that ramps in and out over another avg_s / 2, so a burst rises and falls as a slope instead of a
-        step. It is sampled on a fixed absolute time grid (multiples of step_s) plus the window start and `now`: a past
-        value never changes between calls, so a redraw only slides the picture instead of reshaping it."""
+        step. It is taken on a fixed absolute time grid (multiples of step_s, reaching past both window edges) and
+        rounded into a curve by a quadratic B-spline through those grid values, drawn as straight pieces between the
+        multiples of step_s / sub. That line is a function of absolute time alone: the window only cuts a piece out of
+        it (`t` is the window start, the multiples of step_s / sub inside it, and `now`; both edges lie on the line),
+        so a redraw slides the picture and nothing changes shape where data enters or leaves. Right of the newest grid
+        point the grid values are those the rate will have if no more tokens arrive."""
         now = now or time.time()
         start = now - window_s
         with self.lock:
-            ev = sorted(e for e in self.events if e[0] > start - 2 * avg_s)
-        times = [start]
-        g = (math.floor(start / step_s) + 1) * step_s
-        while g < now:
-            times.append(g)
-            g += step_s
-        times.append(now)
+            ev = sorted(e for e in self.events if e[0] > start - 1.5 * avg_s - 3 * step_s)
+        fine = step_s / sub
+        knots = [k * fine for k in range(math.floor(start / fine), math.ceil(now / fine) + 1)]  # corners of the line: one at or outside each edge
+        cut = (start - knots[0]) / fine, (knots[-1] - now) / fine  # how far into the first / last piece the window edges lie
+        first = math.floor(knots[0] / step_s + 0.5) - 1  # grid index of the first value the spline needs
+        grid = [k * step_s for k in range(first, math.floor(knots[-1] / step_s + 0.5) + 2)]
+        pieces = []  # per knot: (i, weights of grid values i - 1 and i + 1): the spline piece around grid point i, the nearest
+        for t in knots:
+            k = math.floor(t / step_s + 0.5)
+            u = t / step_s + 0.5 - k
+            pieces.append((k - first, (1 - u) ** 2 / 2, u * u / 2))
+        times = [start] + knots[1:-1] + [now]
         out = {"t": times, "models": {}}
         shifts = [j * avg_s / 2 / RAMP_STEPS for j in range(RAMP_STEPS + 1)]
         for p in PROVIDERS:
@@ -317,7 +327,10 @@ class LiveTokens:
                 def upto(x):  # tokens of events at or before x
                     i = bisect.bisect_right(ts, x)
                     return cum[i - 1] if i else 0
-                return [sum(upto(t - s) - upto(t - s - avg_s) for s in shifts) * 60.0 / avg_s / len(shifts) for t in times]
+                v = [sum(upto(g - s) - upto(g - s - avg_s) for s in shifts) * 60.0 / avg_s / len(shifts) for g in grid]
+                y = [a * v[i - 1] + (1 - a - b) * v[i] + b * v[i + 1] for i, a, b in pieces]
+                y[0], y[-1] = y[0] + (y[1] - y[0]) * cut[0], y[-1] + (y[-2] - y[-1]) * cut[1]
+                return y
             out["models"][p] = {fam: curve(*fams[fam]) for fam in sorted(fams)}
             out[p] = [sum(v) for v in zip(*out["models"][p].values())] or [0.0] * len(times)
         return out

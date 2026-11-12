@@ -82,3 +82,21 @@ def test_cents_per_second_counts_the_providers_asked_for_in_the_trailing_window(
                        (now - 20, "claude", 1.0), (now - 90, "openrouter", 5.0)])  # claude: other provider; 90 s: too old
     assert live.cents_per_s(("openrouter",), window_s=60, now=now) == pytest.approx(0.03 * 100 / 60)
     assert live.cents_per_s(("claude", "openrouter"), window_s=60, now=now) == pytest.approx(1.03 * 100 / 60)
+
+
+def test_the_curve_does_not_depend_on_the_window_that_shows_it():
+    live, base = LiveTokens(), 1_000_000.0
+    live.events.extend((base - 420 + 7 * k, "claude", 500 + 900 * (k % 5), 0, 0, "Sonnet") for k in range(60))  # until base - 7
+
+    def window(now, sub, span=300):
+        s = live.series(window_s=span, step_s=5, avg_s=30, now=now, sub=sub)
+        assert s["t"][0] == now - span and s["t"][-1] == now
+        return dict(zip(s["t"], s["claude"]))
+    ref = window(base + 10, 4, 320)  # the line, a corner every 1.25 s
+    for now, sub in ((base, 4), (base + 7.5, 2), (base + 5, 1)):  # other edges, fewer corners: the same value at every shared instant
+        w = window(now, sub)
+        assert len(w) >= 60 and all(v == pytest.approx(ref[t], abs=1e-6) for t, v in w.items())
+    w = window(base + 0.4, 4)  # edges between two corners: on the straight piece that joins them
+    for t, a, b in ((base - 299.6, base - 300, base - 298.75), (base + 0.4, base, base + 1.25)):
+        assert w[t] == pytest.approx(ref[a] + (ref[b] - ref[a]) * 0.4 / 1.25, abs=1e-6)
+    assert max(ref.values()) > 10_000 and ref[base + 0.0] > 0  # there is a curve, still running at the right edge
