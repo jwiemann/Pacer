@@ -290,6 +290,7 @@ class Tab:
         self.inner.columnconfigure(2, weight=0 if compact else 1)
         if compact:
             self.inner.config(padx=4, pady=1)
+            self.inner.columnconfigure(0, minsize=0)
             self.dot.config(font=("Segoe UI", 7))
             self.name.config(width=0, font=mono(8, True))
             self.use.config(width=5, anchor="w", font=mono(10, True))
@@ -301,6 +302,7 @@ class Tab:
             self.dot.config(font=("Segoe UI", 9))
             self.name.config(width=6, font=mono(9, True))  # same width in every tab: equal graphs
             self.use.config(width=6, anchor="e", font=mono(9))
+            self.inner.columnconfigure(0, minsize=24)  # the pause sign is wider than the dot: a fixed column keeps every graph at the same x
             self.dot.grid(row=0, column=0, padx=(4, 0))
             self.name.grid(row=0, column=1, padx=(3, 3))
             self.spark.grid(row=0, column=2, sticky="nsew")  # takes the width left and the whole tab height
