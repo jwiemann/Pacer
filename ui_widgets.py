@@ -311,7 +311,7 @@ class Tab:
         self.frame.config(bg=BLUE if selected else BORDER)
         self.round(fill=TAB_ON if selected else PANEL, border=BLUE if selected else BORDER)
         for w in self.parts:
-            w.config(bg=TAB_ON if selected else PANEL)
+            w.config(bg=INPUT if w is self.spark else TAB_ON if selected else PANEL)  # the graph is a darker field: it shows where the window starts and ends
         self.dot.config(fg=color, text="\u23f8" if paused else "\u25cf")
         self.name.config(fg=FG if selected else MUTED)
         self.use.config(text=usage, fg=FG if selected else MUTED)
