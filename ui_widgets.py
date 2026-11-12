@@ -306,7 +306,7 @@ class Tab:
             self.dot.grid(row=0, column=0, padx=(4, 0))
             self.name.grid(row=0, column=1, padx=(3, 3))
             self.spark.grid(row=0, column=2, sticky="nsew")  # takes the width left and the whole tab height
-            self.use.grid(row=0, column=3, padx=(3, 4))
+            self.use.grid(row=0, column=3, padx=(3, 10))
 
     def set(self, usage, color, selected, spark=None, paused=False):
         """spark: (points, top) with points [(x 0..1, value)] drawn like a Task Manager graph (value 0..top), or None.
