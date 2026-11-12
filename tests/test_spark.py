@@ -17,7 +17,7 @@ def test_the_graph_is_to_scale_in_time_and_percent():
     start = now - span / 2  # window is half over
     pts = [(start + 600, 10.0), (start + 3600, 30.0)]
     points, top = dashboard_data.quota_spark(pts, iso(start + span), span, 42.0, now)
-    assert points == pytest.approx([(600 / span, 10.0), (0.2, 30.0), (0.5, 42.0)])  # half the window: half the width
+    assert [q for p in points for q in p] == pytest.approx([600 / span, 10.0, 0.2, 30.0, 0.5, 42.0])  # half the window: half the width
     assert top == 100.0  # not the peak: 42 % must look like 42 % of the way to the limit
 
 
