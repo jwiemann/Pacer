@@ -122,7 +122,7 @@ def transcript_tokens(kind, rec, state):
 def transcript_cost(kind, rec):
     """(timestamp, provider, USD) of one omp reply that reports its price (usage.cost.total), else None. omp prices every
     reply from the model's list price: real money for OpenRouter, an API-equivalent estimate for Claude and Copilot (flat
-    subscriptions). Claude Code transcripts and the Paperclip run streams carry no cost."""
+    subscriptions). Claude Code transcripts carry no cost."""
     m = rec.get("message") or {}
     if kind != "omp" or rec.get("type") != "message" or m.get("role") != "assistant":
         return None
@@ -131,6 +131,13 @@ def transcript_cost(kind, rec):
     if not provider or not isinstance(cost, (int, float)) or isinstance(cost, bool) or cost <= 0:
         return None
     return rec["timestamp"], provider, float(cost)
+
+
+def event_cost(ev):
+    """USD of one Paperclip run-stream event that reports its price, else None: OpenCode names the cost of every step in
+    its step_finish (part.cost; real money for OpenRouter). The Claude streams carry no cost."""
+    cost = (ev.get("part") or {}).get("cost") if ev.get("type") == "step_finish" else None
+    return float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost > 0 else None
 
 
 def event_tokens(provider, ev, state):
@@ -151,7 +158,7 @@ class LiveTokens:
     def __init__(self):
         self.lock = threading.Lock()
         self.events = deque()   # (epoch, provider, tokens, cache read, prompt, model family)
-        self.costs = deque()    # (epoch, provider, USD) of every omp reply that reports its price
+        self.costs = deque()    # (epoch, provider, USD) of every omp reply and OpenCode step that reports its price
         self.agents = {}        # agent id -> (provider, model family)
         self.files = {}         # path -> {"kind", "provider", "family", "offset", "state", "mtime"}
         self.error = None       # last problem worth showing (logs unreachable ...)
@@ -243,11 +250,13 @@ class LiveTokens:
                     # the run streams carry context growth only, no cache split: they stay out of the hit rate
                     got = None if ev is None else [(rec["ts"], fs["provider"], event_tokens(fs["provider"], ev, fs["state"]), 0, 0,
                                                     fs["family"])]
+                    c = ev and event_cost(ev)
+                    c = c and (rec["ts"], fs["provider"], c)
                 else:
                     got = transcript_tokens(fs["kind"], rec, fs["state"])
                     c = transcript_cost(fs["kind"], rec)
-                    if c:
-                        spent.append((datetime.fromisoformat(c[0].replace("Z", "+00:00")).timestamp(), c[1], c[2]))
+                if c:
+                    spent.append((datetime.fromisoformat(c[0].replace("Z", "+00:00")).timestamp(), c[1], c[2]))
                 for ts, provider, n, read, prompt, fam in got or ():
                     if n or read:
                         out.append((datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp(), provider, n, read, prompt, fam))
@@ -342,7 +351,7 @@ class LiveTokens:
             return sum(e[2] for e in self.events if e[1] == provider and e[0] > now - avg_s) * 60.0 / avg_s
 
     def cents_per_s(self, providers=PROVIDERS, window_s=60, now=None):
-        """Spend in US cents per second of `providers` over the trailing window_s seconds (omp replies only)."""
+        """Spend in US cents per second of `providers` over the trailing window_s seconds (omp replies and OpenCode steps)."""
         now = now or time.time()
         with self.lock:
             usd = sum(c[2] for c in self.costs if c[1] in providers and now - window_s < c[0] <= now)

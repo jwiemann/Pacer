@@ -799,7 +799,7 @@ class Dashboard:
 
     def update_cost(self):
         """Spend rate under the big number: euro cents (euros from 1 EUR) per second over the last minute, for the providers
-        of the shown tab (omp replies only, priced in USD and converted at the ECB rate). Blank while it is zero; the
+        of the shown tab (omp replies and Paperclip's OpenCode agents, priced in USD and converted at the ECB rate). Blank while it is zero; the
         label keeps its row, so the window never changes height."""
         provs = self.COST_PROVIDERS.get(self.sel)
         if not provs:
@@ -811,9 +811,9 @@ class Dashboard:
             return ""
         head = "Spend over the last minute, per second, in euro cents (euros from 1 \u20ac)"
         if self.COST_PROVIDERS.get(self.sel) == ("openrouter",):
-            return head + "\nOpenRouter's own prices (USD at the ECB rate), omp replies only"
+            return head + "\nOpenRouter's own prices (USD at the ECB rate): omp replies and OpenCode agents"
         return (head + "\nat API list prices (USD at the ECB rate):\n"
-                "Claude and Copilot are flat plans, only OpenRouter is billed per use.\nomp replies only")
+                "Claude and Copilot are flat plans, only OpenRouter is billed per use.\nomp replies and OpenCode agents only")
 
     def live_tick(self):
         """About 8 times a second while the Live tab is shown, so the chart slides smoothly (the rest renders every 5 s);

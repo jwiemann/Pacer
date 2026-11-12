@@ -1,4 +1,7 @@
 """live_tokens: model families and the token rate series (per provider and split by model family)."""
+import json
+from datetime import datetime, timezone
+
 import pytest
 
 import live_tokens
@@ -100,3 +103,17 @@ def test_the_curve_does_not_depend_on_the_window_that_shows_it():
     for t, a, b in ((base - 299.6, base - 300, base - 298.75), (base + 0.4, base, base + 1.25)):
         assert w[t] == pytest.approx(ref[a] + (ref[b] - ref[a]) * 0.4 / 1.25, abs=1e-6)
     assert max(ref.values()) > 10_000 and ref[base + 0.0] > 0  # there is a curve, still running at the right edge
+
+
+def test_opencode_steps_of_a_paperclip_run_count_as_spend_of_the_agents_provider():
+    def line(ts, ev):
+        return json.dumps({"ts": ts, "stream": "stdout", "chunk": json.dumps(ev)})
+    step = {"type": "step_finish", "part": {"type": "step-finish", "tokens": {"total": 12484}, "cost": 0.0022}}
+    free = {"type": "step_finish", "part": {"type": "step-finish", "tokens": {"total": 13000}, "cost": 0}}
+    live = LiveTokens()
+    fs = {"kind": "paperclip", "provider": "openrouter", "family": "Deepseek", "state": {}}
+    live._ingest(fs, [line("2026-11-12T11:00:00Z", step), line("2026-11-12T11:00:05Z", free),
+                      line("2026-11-12T11:00:09Z", {"type": "tool_use", "part": {"cost": 5}}), line("2026-11-12T11:00:10Z", step)])
+    at = datetime(2026, 11, 12, 11, 0, 0, tzinfo=timezone.utc).timestamp()
+    assert list(live.costs) == [(at, "openrouter", 0.0022), (at + 10, "openrouter", 0.0022)]
+    assert live.cents_per_s(("openrouter",), window_s=60, now=at + 30) == pytest.approx(0.0044 * 100 / 60)
