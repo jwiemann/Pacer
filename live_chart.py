@@ -102,7 +102,8 @@ def draw_live(c, series, layout, pal, chips, active, resets=(), cache=None, spli
     def ylabels():
         for frac in (0, 0.5, 1):
             c.create_text(L - 6, Y(top * frac), text=fmt_rate(top * frac), fill=pal["muted"], font=small, anchor="e", tags="ylabel")
-    tick_s = next((s for s in TICKS if s / window_s * pw >= 60), TICKS[-1])  # the tick spacing follows the shown span
+    whole_min = window_s > 299  # from the 5 minute span on the axis shows no seconds
+    tick_s = next((s for s in TICKS if s / window_s * pw >= 60 and (s >= 60 or not whole_min)), TICKS[-1])  # the tick spacing follows the shown span
     fmt = "%H:%M" if tick_s >= 60 else "%H:%M:%S"
     off = datetime.fromtimestamp(now).astimezone().utcoffset().total_seconds()  # ticks at local clock multiples (4h ticks: 00, 04, 08 ...)
     k = math.floor((start + off) / tick_s) + 1  # vertical lines at fixed clock times: they slide with the data
