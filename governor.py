@@ -223,23 +223,26 @@ class Governor:
         # Without Paperclip (no install detected and no settings.paperclip = true) the governor only watches the Claude
         # limits: it reads the usage and writes the status file, and never pauses anything.
         with_pc = (cfg["paperclip"] is True) if "paperclip" in cfg else bool(self.cfg.get("wslDistro"))
-        company, agents = None, []
+        company, agents, pc_error = None, [], None
         if with_pc:
+            # The usage must reach the dashboard even when Paperclip is down or refuses us: then this tick only reports
+            # (nothing can be paused through an API that does not answer) and the failure is raised after the status is written.
             try:
                 http_util.request_text(self.cfg["url"] + "/api/health", timeout=8)
-                healthy = True
             except http_util.HttpError:
-                healthy = False
-            if not healthy:
-                self.log("Paperclip not healthy, skipping tick")
-                return
-            companies = [c for c in self.pc("GET", "/companies") if c.get("status") == "active"]
-            if len(companies) != 1:
-                raise RuntimeError(f"expected exactly 1 active company, found {len(companies)}")
-            company = companies[0]
-            agents = [a for a in self.pc("GET", f"/companies/{company['id']}/agents") if a.get("status") != "terminated"]
-            if not any(a.get("adapterType") == "claude_local" for a in agents):
-                raise RuntimeError("no claude_local agent found")
+                self.log("Paperclip not healthy: reporting the usage only")
+                with_pc = False
+            try:
+                if with_pc:
+                    companies = [c for c in self.pc("GET", "/companies") if c.get("status") == "active"]
+                    if len(companies) != 1:
+                        raise RuntimeError(f"expected exactly 1 active company, found {len(companies)}")
+                    company = companies[0]
+                    agents = [a for a in self.pc("GET", f"/companies/{company['id']}/agents") if a.get("status") != "terminated"]
+                    if not any(a.get("adapterType") == "claude_local" for a in agents):
+                        raise RuntimeError("no claude_local agent found")
+            except (http_util.HttpError, RuntimeError) as e:
+                with_pc, pc_error = False, e
 
         settings = {n: throttle.settings_for(cfg, n) for n in throttle.PROVIDERS}
         oauth = self.ensure_fresh_token()
@@ -261,6 +264,8 @@ class Governor:
                 self.log(f"5h {usage['five']}% (resets {js(usage['resets5'])}), 7d {usage['seven']}% (resets {js(usage['resets7'])}); monitor only")
                 self.write_status(st, settings, usage)
             self.save_state(st)
+            if pc_error:
+                raise pc_error
             return
         unknown = not usage and st["usageFailures"] >= USAGE_FAILS_BEFORE_PAUSE
         if not usage and not unknown:
