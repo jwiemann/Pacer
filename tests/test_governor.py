@@ -226,7 +226,7 @@ def test_without_paperclip_nothing_is_paused_but_usage_is_reported(fake):
         assert json.load(f)["usage"]["five"] == 95
 
 
-def test_unhealthy_paperclip_skips_the_tick(fake):
+def test_unhealthy_paperclip_still_reports_the_usage(fake):
     set_settings()
     agent = fake.add_agent("Sentinel", CLAUDE)
     fake.health = (503, {"error": "down"})
@@ -234,7 +234,8 @@ def test_unhealthy_paperclip_skips_the_tick(fake):
     tick_ok()
     assert fake.posted("pause") == []
     assert fake.status(agent) == "active"
-    assert not os.path.exists(governor.STATUS)  # no usage reading, so no status written
+    with open(governor.STATUS, encoding="utf-8") as f:
+        assert json.load(f)["usage"]["five"] == 95
 
 
 def test_tick_fails_without_a_claude_agent_and_pauses_nothing(fake):
