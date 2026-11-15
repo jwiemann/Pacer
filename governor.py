@@ -151,6 +151,9 @@ class Governor:
         return oauth
 
     def sync_token(self, oauth, company, st):
+        if not oauth.get("accessToken") or oauth["expiresAt"] / 1000 <= time.time():
+            self.log("WARN Claude token is empty or expired: not syncing it to WSL (it would overwrite a working login there)")
+            return
         fp = hashlib.sha256(oauth["accessToken"].encode()).hexdigest()
         if st.get("syncedTokenSha") == fp:
             return
