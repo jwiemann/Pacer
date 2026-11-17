@@ -1278,7 +1278,8 @@ class Dashboard:
                 atip += "\n" + {"on": "switched on by hand, although the limits say pause", "off": "switched off by hand"}[ov]
             lcolor = WARN if ov else lcolor
             out = (("go", WARN) if ov == "on" else ("stop", WARN) if ov == "off" else ("stop", BAD) if blocked else ("go", GOOD))
-        self.flow.set_rule(name, head, hcolor, nums, color, notes, tip, None if usage is None else "go", color)
+        away = (running == 0) if running is not None else blocked  # nobody consumes through Paperclip: the tokens go elsewhere
+        self.flow.set_rule(name, head, hcolor, nums, color, notes, tip, None if usage is None else "away" if away else "go", color)
         self.flow.set_agents(name, on, enabled, label, lcolor, atip, *out)
 
     def toggle_ka(self):

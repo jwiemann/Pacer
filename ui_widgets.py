@@ -358,7 +358,7 @@ class Link(tk.Canvas):
         self.from_text, self.lane = from_text, 40  # lane: width of the free part right of the text (set by the owner)
         self.sources, self.target = [], None
         self.mode, self.color, self.level = "idle", MUTED, 0.0
-        self.paths, self.balls, self.gate, self.gate_x, self.shown = [], [], None, 0, {}
+        self.routes, self.balls, self.gate, self.gate_x, self.shown = {"go": [], "away": []}, {"go": [], "away": []}, None, 0, {}
         self.bind("<Configure>", lambda _e: self.layout())
 
     def connect(self, sources, target):
@@ -376,34 +376,49 @@ class Link(tk.Canvas):
     def layout(self):
         """Redraw the lines for the current geometry (also needed when a source's text changed width)."""
         self.delete("all")
-        self.paths, self.balls, self.gate, self.shown = [], [], None, {}
+        self.routes, self.balls, self.gate, self.shown = {"go": [], "away": []}, {"go": [], "away": []}, None, {}
         W = self.winfo_width()
         if W < 12 or self.target is None or self.target.winfo_height() <= 1:
             return
-        ty, end = self.centre(self.target), W - 7
+        ty, end, H = self.centre(self.target), W - 7, self.winfo_height()
         starts = [(w.winfo_x() + w.winfo_reqwidth() + 4 - self.winfo_x() if self.from_text else 0, self.centre(w)) for w in self.sources]
         bus = min(end - 6, W - self.lane / 2) if self.from_text else W * 0.4
         for x0, y0 in starts:
             pts = [(x0, y0), (bus, y0), (bus, ty), (end, ty)] if abs(y0 - ty) > 1 else [(x0, ty), (end, ty)]
             self.create_line(*[c for p in pts for c in p], fill=self.LINE)
             self.create_oval(x0 - 2, y0 - 2, x0 + 2, y0 + 2, fill=self.LINE, outline="")
-            cum = [0.0]
-            for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
-                cum.append(cum[-1] + abs(xb - xa) + abs(yb - ya))
-            self.paths.append((pts, cum))
+            self.routes["go"].append(self.route(pts))
+            if self.from_text:  # "away": the tokens leave the lane downwards, to somewhere the Pacer cannot see
+                self.routes["away"].append(self.route([(x0, y0), (bus, y0), (bus, H - 4)]))
         self.create_polygon(end - 1, ty - 3.5, W, ty, end - 1, ty + 3.5, fill=self.LINE, outline="")
         self.gate_x = (bus + end) / 2 if self.from_text else end / 2
         self.gate = self.create_line(self.gate_x, ty - 7, self.gate_x, ty + 7, width=2, state="hidden")
-        for _pts, cum in self.paths:
-            self.balls.append([self.create_oval(0, 0, 0, 0, state="hidden", outline="") for _ in range(int(cum[-1] / self.MIN_SP) + 2)])
+        self.away_items = []
+        if self.from_text:
+            self.away_items = [self.create_line(bus, ty, bus, H - 8, dash=(2, 4), state="hidden"),
+                               self.create_polygon(bus - 3.5, H - 8, bus + 3.5, H - 8, bus, H - 1, state="hidden")]
+        for kind, routes in self.routes.items():
+            self.balls[kind] = [[self.create_oval(0, 0, 0, 0, state="hidden", outline="") for _ in range(int(cum[-1] / self.MIN_SP) + 2)]
+                                for _pts, cum in routes]
         self.paint()
 
+    @staticmethod
+    def route(pts):
+        """(points, distance at each point) of a polyline."""
+        cum = [0.0]
+        for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
+            cum.append(cum[-1] + abs(xb - xa) + abs(yb - ya))
+        return pts, cum
+
     def paint(self):
-        for balls in self.balls:
-            for b in balls:
-                self.itemconfigure(b, fill=self.color)
+        for balls in self.balls.values():
+            for row in balls:
+                for b in row:
+                    self.itemconfigure(b, fill=self.color)
         if self.gate is not None:
             self.itemconfigure(self.gate, fill=self.color, state="normal" if self.mode == "stop" else "hidden")
+        for item in getattr(self, "away_items", []):
+            self.itemconfigure(item, fill=self.color, state="normal" if self.mode == "away" else "hidden")
 
     def show(self, item, on):
         if self.shown.get(item) != on:
@@ -422,16 +437,19 @@ class Link(tk.Canvas):
 
     def tick(self, t):
         """Move the balls to where they are at time t (seconds)."""
-        live = self.mode == "go" and self.level > 0
+        kind = "away" if self.mode == "away" else "go"
+        live = self.mode in ("go", "away") and self.level > 0
         spacing = self.MAX_SP - (self.MAX_SP - self.MIN_SP) * self.level
         r = 1.5 + 2.3 * self.level
-        for n, ((pts, cum), balls) in enumerate(zip(self.paths, self.balls)):
-            base = (t * self.SPEED + n * spacing / 3) % spacing
-            for k, ball in enumerate(balls):
-                s = base + k * spacing
-                if not live or s >= cum[-1]:
-                    self.show(ball, False)
-                    continue
-                x, y = self.point(pts, cum, s)
-                self.coords(ball, x - r, y - r, x + r, y + r)
-                self.show(ball, True)
+        for k_, balls in self.balls.items():  # balls of the route that is not in use stay hidden
+            for n, row in enumerate(balls):
+                pts, cum = self.routes[k_][n]
+                base = (t * self.SPEED + n * spacing / 3) % spacing
+                for k, ball in enumerate(row):
+                    s = base + k * spacing
+                    if not live or k_ != kind or s >= cum[-1]:
+                        self.show(ball, False)
+                        continue
+                    x, y = self.point(pts, cum, s)
+                    self.coords(ball, x - r, y - r, x + r, y + r)
+                    self.show(ball, True)
