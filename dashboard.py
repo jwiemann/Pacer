@@ -1242,19 +1242,22 @@ class Dashboard:
         rule = sub.get("rule") or {"mode": sub.get("mode"), "reason": sub.get("reason")}
         rmode, reason = rule.get("mode"), rule.get("reason")
         blocked = rmode not in (None, "active")
-        head, hcolor = ("-", MUTED) if rmode is None else ("block", BAD) if blocked else ("allow", GOOD)
+        head, hcolor = ("-", MUTED) if rmode is None else ("\u2717", BAD) if blocked else ("\u2713", GOOD)  # blocked / allowed
         nums, notes = "-", ["", ""]
         if usage is not None:
             ref = resume if blocked and usage < pause else pause  # a blocked provider stays blocked until it is below `resume`
             op = "\u2265" if usage >= ref else "<"
             nums = f"{usage:.1f}".removesuffix(".0") + f"% {op} {ref}%"  # one decimal at most: the box is narrow
-        if blocked:
-            notes = [{"limit": "limit reached", "pace": "too fast", "unknown": "no usage reading"}.get(reason, ""),
-                     {"limit": f"resume below {resume}%", "pace": "until back on plan"}.get(reason, "")]
+        why = {"limit": "limit reached", "pace": "too fast", "unknown": "no usage reading"}.get(reason, "")
+        if blocked:  # \u25a0 limit, \u25b2 too fast, ? no reading; \u25b6 = what lets the agents run again
+            notes = [{"limit": "\u25a0", "pace": "\u25b2", "unknown": "?"}.get(reason, ""),
+                     {"limit": f"\u25b6 < {resume}%", "pace": "\u25b6 = plan"}.get(reason, "")]
         elif rmode == "active":
-            notes = ["limit 100%" if fb else f"pause at {pause}%", "or too fast" if cfg["byPace"] else ""]
-        tip = "\n".join(["full budget: pause at 100%" if fb else f"pause at {pause}%"] + ([] if fb else [f"resume below {resume}%"])
+            notes = [f"\u25a0 {pause}%" if fb else f"\u23f8 {pause}%", "\u25b2" if cfg["byPace"] else ""]
+        tip = "\n".join([{"-": "", "\u2717": "block", "\u2713": "allow"}[head], why if blocked else ""]
+                        + ["full budget: pause at 100%" if fb else f"pause at {pause}%"] + ([] if fb else [f"resume below {resume}%"])
                         + (["Pause when too fast"] if cfg["byPace"] else []))
+        tip = "\n".join(x for x in tip.split("\n") if x)
 
         ag, ov = sub.get("agents"), sub.get("override")
         running = None if ag is None else ag["total"] - ag["paused"]
@@ -1264,16 +1267,17 @@ class Dashboard:
             pend = None
         out = ("idle", MUTED)
         if pend:
-            on, enabled, label, lcolor, atip = pend[0] == "on", True, "...", MUTED, ""
+            on, enabled, label, lcolor, atip = pend[0] == "on", True, "\u2026", MUTED, ""
         elif not pc_on or ag is None:
             on, enabled, label, lcolor, atip = False, False, "-", MUTED, "Paperclip is not reachable"
         elif ag["total"] == 0:
-            on, enabled, label, lcolor, atip = False, False, "no agents", MUTED, ""
+            on, enabled, label, lcolor, atip = False, False, "\u2205", MUTED, "no agents"
         else:
             on, enabled = running > 0, True
-            label, lcolor = (("draining", WARN) if sub.get("mode") == "draining" and on else ("running", GOOD) if running == ag["total"]
-                             else ("paused", WARN) if not on else (f"{running}/{ag['total']} running", WARN))
-            atip = f"{running} of {ag['total']} agents running"
+            label, lcolor = (("\u25bc", WARN) if sub.get("mode") == "draining" and on else ("\u25b6", GOOD) if running == ag["total"]
+                             else ("\u23f8", WARN) if not on else (f"\u25b6 {running}/{ag['total']}", WARN))  # draining / running / paused / some
+            state = "draining" if label == "\u25bc" else "running" if label == "\u25b6" else "paused" if label == "\u23f8" else ""
+            atip = f"{state}\n{running} of {ag['total']} agents running".strip()
             if ov:
                 atip += "\n" + {"on": "switched on by hand, although the limits say pause", "off": "switched off by hand"}[ov]
             lcolor = WARN if ov else lcolor

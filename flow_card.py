@@ -70,12 +70,13 @@ class FlowCard:
                 lane["static"] += [dash.lbls[key], dash.vals[key]]
             lane["rule"], lane["rule_lines"] = self.node(), []
             lane["rule_tip"] = ""
-            for i, (font, fg) in enumerate(((mono(9, True), FG), (mono(9), FG), (("Segoe UI", 8), MUTED), (("Segoe UI", 8), MUTED))):
+            for i, (font, fg) in enumerate(((("Segoe UI Symbol", 12, "bold"), FG), (mono(9), FG), (("Segoe UI Symbol", 9), MUTED), (("Segoe UI Symbol", 9), MUTED))):
                 lb = tk.Label(lane["rule"], bg=PANEL, fg=fg, font=font, anchor="w")
                 lb.grid(row=i, column=0, sticky="w")
                 lane["rule_lines"].append(lb)
             lane["toggle_box"], lane["var"] = self.node(), tk.BooleanVar(value=False)
             lane["switch"] = Switch(lane["toggle_box"], "", lane["var"], lambda n=name: on_toggle(n))
+            lane["switch"].lbl.config(font=("Segoe UI Symbol", 11))
             lane["switch"].pack(fill="x")
             lane["tip"] = ""
             lane["link_in"], lane["link_out"] = Link(card, from_text=True), Link(card)
