@@ -28,6 +28,12 @@ def _pct(v):
     return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 100
 
 
+def agents_off(cfg):
+    """Providers whose agents the user switched off by hand (settings key agentsOff)."""
+    off = (cfg or {}).get("agentsOff")
+    return {n for n in off if n in PROVIDERS} if isinstance(off, list) else set()
+
+
 def settings_for(cfg, name):
     """Validated throttle settings of one provider; anything missing or invalid falls back to its default."""
     raw = ((cfg or {}).get("providers") or {}).get(name)

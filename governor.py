@@ -59,6 +59,7 @@ class Governor:
         self.dry, self.fake = dry, fake
         self.cfg = pacer_config.get()
         self.live = None  # agent ids with a live run, fetched once per tick when a provider has to pause
+        self.off = set()  # providers whose agents the user switched off by hand (read each tick)
 
     # ---- plumbing
     def log(self, msg):
@@ -223,6 +224,7 @@ class Governor:
     def tick(self):
         st = self.load_state()
         cfg = self.read_settings(st)
+        self.off = throttle.agents_off(cfg)
         # Without Paperclip (no install detected and no settings.paperclip = true) the governor only watches the Claude
         # limits: it reads the usage and writes the status file, and never pauses anything.
         with_pc = (cfg["paperclip"] is True) if "paperclip" in cfg else bool(self.cfg.get("wslDistro"))
@@ -323,6 +325,13 @@ class Governor:
         agents of no known provider are never paused, and one the governor paused earlier is resumed at once. Nothing
         is handed to another agent. Only agents the governor paused itself are resumed again."""
         mine = set(ps.get("pausedAgents") or [])
+        if name in self.off:
+            self.switch_off(name, ps, agents)
+            return
+        if ps.get("reason") == "manual":  # switched on again: resume what the switch paused, then the limits decide as usual
+            self.resume_mine(agents, mine)
+            ps.update(mode="active", reason=None)
+            ps["pausedAgents"] = sorted(mine)
         for a in agents:
             if throttle.provider_of(a) != name and a.get("status") == "paused" and a["id"] in mine:
                 self.log(f"resuming {a['name']} (not on the {throttle.LABEL[name]} budget)")
@@ -375,6 +384,28 @@ class Governor:
                     self.pc("POST", f"/agents/{a['id']}/resume")
             mine.clear()
         ps["pausedAgents"] = sorted(mine)
+
+
+    def resume_mine(self, agents, mine):
+        """Resume the agents in `mine` that are still paused; `mine` ends empty."""
+        for a in agents:
+            if a.get("status") == "paused" and a["id"] in mine:
+                self.log(f"resuming {a['name']}")
+                if not self.dry:
+                    self.pc("POST", f"/agents/{a['id']}/resume")
+        mine.clear()
+
+    def switch_off(self, name, ps, agents):
+        """The user switched this provider's agents off: pause them all at once (live runs too), and keep them paused."""
+        mine = set(ps.get("pausedAgents") or [])
+        for a in agents:
+            if throttle.provider_of(a) != name or a.get("status") == "paused":
+                continue
+            self.log(f"pausing {a['name']} ({throttle.LABEL[name]} agents switched off)")
+            if not self.dry:
+                self.pc("POST", f"/agents/{a['id']}/pause")
+            mine.add(a["id"])
+        ps.update(mode="paused", reason="manual", pausedAgents=sorted(mine))
 
 
 def run(dry=False, fake=None):

@@ -482,3 +482,23 @@ def test_openrouter_below_the_limit_and_keys_without_limit_pause_nothing(fake):
     set_openrouter(used=None, unlimited=True)
     tick_ok()
     assert fake.posted("pause") == []
+
+
+def test_manual_switch_pauses_and_resumes_one_provider(fake):
+    set_settings()
+    claude = fake.add_agent("Atlas", CLAUDE)
+    eli = fake.add_agent("Eli", OPENCODE)
+    fake.set_usage(five=10, seven=10)
+    with open(governor.SETTINGS, encoding="utf-8") as f:
+        cfg = json.load(f)
+    with open(governor.SETTINGS, "w", encoding="utf-8") as f:
+        json.dump({**cfg, "agentsOff": ["claude"]}, f)
+    tick_ok()
+    assert fake.status(claude) == "paused" and fake.status(eli) == "active"
+    assert sub()["reason"] == "manual"
+    tick_ok()  # stays paused
+    assert fake.posted("pause") == [claude]
+    with open(governor.SETTINGS, "w", encoding="utf-8") as f:
+        json.dump({**cfg, "agentsOff": []}, f)
+    tick_ok()
+    assert fake.status(claude) == "active" and sub()["mode"] == "active"

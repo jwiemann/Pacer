@@ -216,6 +216,14 @@ class Dashboard:
         ag = self.agents = panel("Agents", card=True)  # run state of each provider's agents, below the services
         ag.columnconfigure(1, weight=1)
         rows(ag, ("Claude agents", "Copilot agents", "OpenRouter agents"))
+        self.ag_sw, self.ag_on = {}, {}  # per provider: the on/off switch of its agents (off = paused by hand) and its variable
+        for r, name in enumerate(throttle.PROVIDERS, 1):
+            key = f"{throttle.LABEL[name]} agents"
+            self.ag_on[name] = tk.BooleanVar(value=True)
+            sw = self.ag_sw[key] = Switch(ag, "", self.ag_on[name], lambda n=name: self.toggle_agents(n))
+            sw.grid(row=r, column=2, sticky="e", padx=(GAP, 0), pady=2)
+            sw.bind("<Enter>", lambda e, n=name: self.show_tip(e, f"Switch the {throttle.LABEL[n]} agents in Paperclip on or off by hand."))
+            sw.bind("<Leave>", self.hide_tip)
         self.align_details()
 
         self.tips, self.tip, self.sym_tip = {}, None, {}  # hover texts per Status row; the spelled-out status behind a symbol
@@ -316,7 +324,8 @@ class Dashboard:
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind("<Escape>", lambda _e: self.close_settings() if self.page_open else self.close())
         root.bind("<Return>", lambda _e: self.apply_limits())
-        self.sel = None  # tab shown in the chart ("5h" / "7d" / "cop" / "live")
+        self.sel = None  # tab shown in the chart ("5h" / "7d" / "cop" / "or" / "live")
+        self.views = {}  # tab -> (pace zoom, live width, live end) left behind when another tab came up
         self.live = LiveTokens()
         self.live.start()
         self.refresh()
@@ -723,6 +732,13 @@ class Dashboard:
             self.zoom = None
             self.redraw_chart()
 
+    def switch_view(self, sel):
+        """Another graph comes up: the view (zoom and pan) of the one that goes is kept, the new graph gets back its own
+        (a graph never seen starts whole / on the Live preset). Kept for this session."""
+        self.views[self.sel] = (self.zoom, self.live_width, self.live_end)
+        self.zoom, self.live_width, self.live_end = self.views.get(sel, (None, LIVE_CHIPS[self.live_preset], None))
+        self.hover_t = None
+
     def reset_live(self):
         """The Live chart back to its preset span, following now."""
         self.live_width, self.live_end = LIVE_CHIPS[self.live_preset], None
@@ -738,8 +754,8 @@ class Dashboard:
 
     def chart_wheel(self, e):
         """Mouse wheel over the chart zooms its time axis around the pointer (wheel up = in); on the Live chart the data
-        level (second ... 24 h resolution) follows the zoom. The reset-zoom chip, a double click and every switch to another
-        graph undo it."""
+        level (second ... 24 h resolution) follows the zoom. The reset-zoom chip and a double click undo it; every graph keeps its
+        own view while another one is shown."""
         if self.root.winfo_containing(e.x_root, e.y_root) is not self.chart or (self.sel != "live" and self.chart_args is None):
             return
         left, right = self.plot_x
@@ -1068,7 +1084,7 @@ class Dashboard:
         for k, lbl in self.lbls.items():
             on = ((self.cop_on or k not in COPILOT_ROWS) and (self.or_on or k not in OPENROUTER_ROWS)
                   and (self.pc_on or k not in PAPERCLIP_ROWS))
-            for w in (lbl, self.pc_frame if k == "Paperclip" else self.vals[k]):
+            for w in (lbl, self.pc_frame if k == "Paperclip" else self.vals[k]) + ((self.ag_sw[k],) if k in self.ag_sw else ()):
                 w.grid() if on else w.grid_remove()
         for title, on in (("CLAUDE", True), ("COPILOT", self.cop_on), ("OPENROUTER", self.or_on)):
             for w in (self.heads[title], self.heads[title].sep):
@@ -1255,6 +1271,13 @@ class Dashboard:
         write_settings(sleepWhenIdle=on)
         self.flash("PC may sleep 10 min after Paperclip goes idle" if on else "PC stays awake while 'Keep PC awake' is on", GOOD)
 
+    def toggle_agents(self, name):
+        """Manual switch of one provider's agents: saved at once, the governor pauses or resumes them in an immediate tick."""
+        off = [n for n in throttle.PROVIDERS if not self.ag_on[n].get()]
+        write_settings(agentsOff=off)
+        self.check_now()
+        self.flash(f"{throttle.LABEL[name]} agents switched {'on' if self.ag_on[name].get() else 'off'}", GOOD)
+
     def toggle_ka(self):
         """Keep-awake applies at once (no Apply step): the tray polls the settings file and holds the wake lock."""
         on = bool(self.ka_var.get())
@@ -1394,7 +1417,7 @@ class Dashboard:
         if or_usage is not None and or_reset and or_span:  # a limit that resets is a pace like Copilot's month
             or_p = tray_icon.pace(or_usage, or_reset, "or", or_thr, span_s=or_span, early_s=or_span * 0.05)
             or_color = HEX[tray_icon.window_verdict(or_p, or_usage, or_span)]
-            or_hist = quota_history(OPENROUTER_HIST, datetime.fromisoformat(or_reset).timestamp() - or_span)
+            or_hist = quota_history(OPENROUTER_HIST, datetime.fromisoformat(or_reset).timestamp() - or_span, os_.get("label"))
         elif or_usage is not None:  # a limit that never resets has no plan line: colour by distance to the limit
             or_color = HEX["bad" if or_usage >= or_thr else "warn" if or_usage >= 0.8 * or_thr else "good"]
         for win, (usage, _p, color) in info.items():
@@ -1406,8 +1429,7 @@ class Dashboard:
         self.tabs["or"].set("-" if or_usage is None else pct_text(or_usage), or_color, sel == "or",
                             quota_spark(or_hist, or_reset, or_span, or_usage, now), held["openrouter"])
         if sel != self.sel:
-            self.zoom = None  # a zoom belongs to one graph
-            self.reset_live()
+            self.switch_view(sel)
         self.sel = sel
         # a provider whose usage did not move for 24 h (and that runs no tokens and is not paused) has no tabs, unless one is shown
         busy = {"CLAUDE": ("claude", quota_moved([(h[0], h[1]) for h in hist], u.get("five"), now)
@@ -1547,9 +1569,12 @@ class Dashboard:
             mode = subs[name].get("mode")
             self.tips[key] = "" if mode in (None, "active") else {
                 "pace": "usage is ahead of the plan", "limit": "limit reached",
-                "unknown": "no usage reading"}.get(subs[name].get("reason"), "")
+                "unknown": "no usage reading", "manual": "switched off by hand"}.get(subs[name].get("reason"), "")
             self.put(key, mode and {"active": "running"}.get(mode, mode) or "-",
                      {"active": GOOD, None: MUTED}.get(mode, WARN))
+        off = throttle.agents_off(read_settings())
+        for name in throttle.PROVIDERS:
+            self.ag_on[name].set(name not in off)
 
         # settings (do not clobber a pending change)
         for name, pv in self.prov.items():
