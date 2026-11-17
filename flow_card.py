@@ -6,6 +6,7 @@ Thin lines connect the three stages; small balls run along them in that directio
 where they belong in that flow: the governor above the rule checks, Paperclip with its server and watchdog above the
 agent switches. The Dashboard owns the data; this class owns the widgets, their layout and the animation.
 """
+import math
 import tkinter as tk
 
 from ui_widgets import PANEL, FG, MUTED, BORDER, Switch, Link, button, mono, round_corners
@@ -173,6 +174,13 @@ class FlowCard:
         lane["switch"].set_label(label, color)
         lane["tip"] = tip
         lane["link_out"].set_flow(flow, fcolor)
+
+    def set_rates(self, rates):
+        """Token rates (tokens/min) per provider drive both lines of its lane: no balls at 0; from about 100 to 100k
+        tokens/min more, closer and bigger balls (logarithmic)."""
+        for name, lane in self.lanes.items():
+            level = min(1.0, max(0.05, (math.log10(rates[name]) - 2) / 3)) if rates.get(name, 0) > 0 else 0.0
+            lane["link_in"].level = lane["link_out"].level = level
 
     def tick(self, t):
         """Animation step (seconds): move the balls of every visible line."""

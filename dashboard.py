@@ -790,7 +790,11 @@ class Dashboard:
         """About 25 times a second: the balls on the lines of the Status card."""
         try:
             if self.details and not self.tabs_only and not self.page_open:
-                self.flow.tick(time.monotonic())
+                now = time.monotonic()
+                if now - getattr(self, "rates_at", 0.0) > 1:  # the token rates change slowly: once a second
+                    self.rates_at = now
+                    self.flow.set_rates({p: self.live.rate(p, 10) for p in throttle.PROVIDERS})
+                self.flow.tick(now)
         except Exception:
             LOGGER.error("dashboard animation\n%s", traceback.format_exc().rstrip())
         self.root.after(40, self.anim_tick)

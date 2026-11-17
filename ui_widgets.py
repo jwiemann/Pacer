@@ -348,15 +348,16 @@ class Link(tk.Canvas):
     """Thin connector from the widgets on its left (`sources`) to one `target`, with small balls running along it in
     that direction. Sources and target sit in the same grid as the canvas: their vertical centres are the line ends.
     With `from_text` the canvas reaches over the source widgets and each line starts at the right end of its text.
-    Modes: "go" (the balls run to the target), "stop" (they run into a gate half way and vanish there), "idle" (the line
-    only). Colour = the balls. Time-driven: tick(t) places them."""
-    SPEED, SPACING, R, LINE = 34.0, 22.0, 2.5, "#4a505a"  # px/s, px between balls, ball radius, line colour
+    Modes: "go" (balls run to the target), "stop" (a gate half way, no balls), "idle" (the line only). Colour = the
+    balls. In "go" the balls follow `level` (0..1, set by the owner from the token rate): none at 0, more, closer and
+    bigger balls the higher it is. Time-driven: tick(t) places them."""
+    SPEED, MIN_SP, MAX_SP, LINE = 34.0, 13.0, 30.0, "#4a505a"  # px/s, spacing of balls at full / lowest level, line colour
 
     def __init__(self, parent, from_text=False):
         super().__init__(parent, bg=PANEL, highlightthickness=0, width=1, height=1)
         self.from_text, self.lane = from_text, 40  # lane: width of the free part right of the text (set by the owner)
         self.sources, self.target = [], None
-        self.mode, self.color = "idle", MUTED
+        self.mode, self.color, self.level = "idle", MUTED, 0.0
         self.paths, self.balls, self.gate, self.gate_x, self.shown = [], [], None, 0, {}
         self.bind("<Configure>", lambda _e: self.layout())
 
@@ -394,15 +395,13 @@ class Link(tk.Canvas):
         self.gate_x = (bus + end) / 2 if self.from_text else end / 2
         self.gate = self.create_line(self.gate_x, ty - 7, self.gate_x, ty + 7, width=2, state="hidden")
         for _pts, cum in self.paths:
-            self.balls.append([self.create_oval(0, 0, 0, 0, state="hidden", outline="") for _ in range(int(cum[-1] / self.SPACING) + 2)])
+            self.balls.append([self.create_oval(0, 0, 0, 0, state="hidden", outline="") for _ in range(int(cum[-1] / self.MIN_SP) + 2)])
         self.paint()
 
     def paint(self):
         for balls in self.balls:
             for b in balls:
                 self.itemconfigure(b, fill=self.color)
-                if self.mode == "idle":
-                    self.show(b, False)
         if self.gate is not None:
             self.itemconfigure(self.gate, fill=self.color, state="normal" if self.mode == "stop" else "hidden")
 
@@ -423,20 +422,16 @@ class Link(tk.Canvas):
 
     def tick(self, t):
         """Move the balls to where they are at time t (seconds)."""
-        if self.mode == "idle" or not self.paths:
-            return
+        live = self.mode == "go" and self.level > 0
+        spacing = self.MAX_SP - (self.MAX_SP - self.MIN_SP) * self.level
+        r = 1.5 + 2.3 * self.level
         for n, ((pts, cum), balls) in enumerate(zip(self.paths, self.balls)):
-            base = (t * self.SPEED + n * self.SPACING / 3) % self.SPACING
-            limit = cum[-1]
-            if self.mode == "stop":  # run until the gate: the distance of the gate along this path
-                limit = next((cum[i - 1] + self.gate_x - pts[i - 1][0] for i in range(1, len(pts))
-                              if pts[i - 1][0] < self.gate_x <= pts[i][0]), limit)
+            base = (t * self.SPEED + n * spacing / 3) % spacing
             for k, ball in enumerate(balls):
-                s = base + k * self.SPACING
-                if s >= limit:
+                s = base + k * spacing
+                if not live or s >= cum[-1]:
                     self.show(ball, False)
                     continue
                 x, y = self.point(pts, cum, s)
-                r = self.R * max(0.25, min(1.0, (limit - s) / 8)) if self.mode == "stop" else self.R
                 self.coords(ball, x - r, y - r, x + r, y + r)
                 self.show(ball, True)
