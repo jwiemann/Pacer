@@ -68,12 +68,14 @@ class FlowCard:
                 dash.vals[key] = tk.Label(card, bg=PANEL, fg=FG, font=mono(9), anchor="w")
                 dash.vals[key].grid(row=r, column=1, sticky="w", padx=(GAP, 0), pady=2)
                 lane["static"] += [dash.lbls[key], dash.vals[key]]
-            lane["rule"], lane["rule_lines"] = self.node(), []
-            lane["rule_tip"] = ""
-            for i, (font, fg) in enumerate(((("Segoe UI Symbol", 12, "bold"), FG), (mono(9), FG), (("Segoe UI Symbol", 9), MUTED), (("Segoe UI Symbol", 9), MUTED))):
-                lb = tk.Label(lane["rule"], bg=PANEL, fg=fg, font=font, anchor="w")
-                lb.grid(row=i, column=0, sticky="w")
-                lane["rule_lines"].append(lb)
+            lane["rule"], lane["rule_rows"], lane["rule_tips"] = self.node(), [], [""] * 3
+            lane["rule"].columnconfigure(0, minsize=24)  # one icon column, one text column: the rows line up
+            for i in range(3):
+                icon = tk.Label(lane["rule"], bg=PANEL, fg=FG, font=("Segoe UI Symbol", 12 if i == 0 else 10, "bold" if i == 0 else "normal"), anchor="center")
+                text = tk.Label(lane["rule"], bg=PANEL, fg=FG, font=mono(9), anchor="w")
+                icon.grid(row=i, column=0, sticky="ew", pady=1)
+                text.grid(row=i, column=1, sticky="w", padx=(6, 0), pady=1)
+                lane["rule_rows"].append((icon, text))
             lane["toggle_box"], lane["var"] = self.node(), tk.BooleanVar(value=False)
             lane["switch"] = Switch(lane["toggle_box"], "", lane["var"], lambda n=name: on_toggle(n))
             lane["switch"].lbl.config(font=("Segoe UI Symbol", 11))
@@ -82,10 +84,13 @@ class FlowCard:
             lane["link_in"], lane["link_out"] = Link(card, from_text=True), Link(card)
             lane["link_in"].connect([dash.vals[k] for k in feeders], lane["rule"])
             lane["link_out"].connect([lane["rule"]], lane["toggle_box"])
-            for box, key, parts in ((lane["rule"], "rule_tip", lane["rule"].winfo_children()), (lane["toggle_box"], "tip", [lane["switch"]])):
-                for t in [box] + list(parts):  # Switch.bind covers the label and the knob
-                    t.bind("<Enter>", lambda e, n=name, k=key: dash.show_tip(e, self.lanes[n][k]), add="+")
+            for i, row_ in enumerate(lane["rule_rows"]):  # a hint belongs to the row hovered, not to the box
+                for t in row_:
+                    t.bind("<Enter>", lambda e, n=name, i=i: dash.show_tip(e, self.lanes[n]["rule_tips"][i]), add="+")
                     t.bind("<Leave>", dash.hide_tip, add="+")
+            for t in [lane["toggle_box"], lane["switch"]]:  # Switch.bind covers the label and the knob
+                t.bind("<Enter>", lambda e, n=name: dash.show_tip(e, self.lanes[n]["tip"]), add="+")
+                t.bind("<Leave>", dash.hide_tip, add="+")
             row += len(items) + 3  # title, rows, and two spare rows for the compact layout
         self.last = row
 
@@ -156,14 +161,17 @@ class FlowCard:
             self.relayout()
 
     # ---- content
-    def set_rule(self, name, verdict, vcolor, nums, ncolor, notes, tip, flow, fcolor):
-        """The rule check of one lane: verdict word, the numbers behind it, up to two notes, tooltip; `flow`/`fcolor`
-        = the line from the status into it (None = no reading, nothing flows)."""
+    def set_rule(self, name, rows, flow, fcolor):
+        """The rule check of one lane: up to three rows (icon, text, icon colour, text colour, hint) - the verdict with the
+        numbers behind it, then what limits and resumes; `flow`/`fcolor` = the line from the status into it (None = no
+        reading)."""
         lane = self.lanes[name]
-        for lb, (text, color) in zip(lane["rule_lines"], ((verdict, vcolor), (nums, ncolor), (notes[0], MUTED), (notes[1], MUTED))):
-            lb.config(text=text, fg=color)
-            lb.grid() if text else lb.grid_remove()
-        lane["rule_tip"] = tip
+        for i, ((icon, text), (ic, tx, icc, txc, tip)) in enumerate(zip(lane["rule_rows"], rows + [("", "", FG, FG, "")] * 3)):
+            icon.config(text=ic, fg=icc)
+            text.config(text=tx, fg=txc)
+            lane["rule_tips"][i] = tip
+            for w in (icon, text):
+                w.grid() if ic or tx else w.grid_remove()
         lane["link_in"].set_flow("idle" if flow is None else flow, fcolor)
 
     def set_agents(self, name, on, enabled, label, color, tip, flow, fcolor):

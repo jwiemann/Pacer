@@ -1243,21 +1243,23 @@ class Dashboard:
         rmode, reason = rule.get("mode"), rule.get("reason")
         blocked = rmode not in (None, "active")
         head, hcolor = ("-", MUTED) if rmode is None else ("\u2717", BAD) if blocked else ("\u2713", GOOD)  # blocked / allowed
-        nums, notes = "-", ["", ""]
+        nums = "-"
         if usage is not None:
             ref = resume if blocked and usage < pause else pause  # a blocked provider stays blocked until it is below `resume`
             op = "\u2265" if usage >= ref else "<"
             nums = f"{usage:.1f}".removesuffix(".0") + f"% {op} {ref}%"  # one decimal at most: the box is narrow
         why = {"limit": "limit reached", "pace": "too fast", "unknown": "no usage reading"}.get(reason, "")
+        pause_tip = "full budget: pause at 100%" if fb else f"pause at {pause}%"
+        rows = [(head, nums, hcolor, color, "\n".join(x for x in ({"-": "", "\u2717": "block", "\u2713": "allow"}[head], why if blocked else "") if x))]
         if blocked:  # \u25a0 limit, \u25b2 too fast, ? no reading; \u25b6 = what lets the agents run again
-            notes = [{"limit": "\u25a0", "pace": "\u25b2", "unknown": "?"}.get(reason, ""),
-                     {"limit": f"\u25b6 < {resume}%", "pace": "\u25b6 = plan"}.get(reason, "")]
+            rows += {"limit": [("\u25a0", f"{pause}%", MUTED, MUTED, "limit reached"),
+                               ("\u25b6", f"< {resume}%", MUTED, MUTED, f"resume below {resume}%")],
+                     "pace": [("\u25b2", "", MUTED, MUTED, "too fast"), ("\u25b6", "plan", MUTED, MUTED, "until back on plan")],
+                     "unknown": [("?", "", MUTED, MUTED, "no usage reading")]}.get(reason, [])
         elif rmode == "active":
-            notes = [f"\u25a0 {pause}%" if fb else f"\u23f8 {pause}%", "\u25b2" if cfg["byPace"] else ""]
-        tip = "\n".join([{"-": "", "\u2717": "block", "\u2713": "allow"}[head], why if blocked else ""]
-                        + ["full budget: pause at 100%" if fb else f"pause at {pause}%"] + ([] if fb else [f"resume below {resume}%"])
-                        + (["Pause when too fast"] if cfg["byPace"] else []))
-        tip = "\n".join(x for x in tip.split("\n") if x)
+            rows += [("\u25a0" if fb else "\u23f8", f"{pause}%", MUTED, MUTED, pause_tip)]
+            if cfg["byPace"]:
+                rows += [("\u25b2", "", MUTED, MUTED, "Pause when too fast")]
 
         ag, ov = sub.get("agents"), sub.get("override")
         running = None if ag is None else ag["total"] - ag["paused"]
@@ -1283,7 +1285,7 @@ class Dashboard:
             lcolor = WARN if ov else lcolor
             out = (("go", WARN) if ov == "on" else ("stop", WARN) if ov == "off" else ("stop", BAD) if blocked else ("go", GOOD))
         away = (running == 0) if running is not None else blocked  # nobody consumes through Paperclip: the tokens go elsewhere
-        self.flow.set_rule(name, head, hcolor, nums, color, notes, tip, None if usage is None else "away" if away else "go", color)
+        self.flow.set_rule(name, rows, None if usage is None else "away" if away else "go", color)
         self.flow.set_agents(name, on, enabled, label, lcolor, atip, *out)
 
     def toggle_ka(self):
