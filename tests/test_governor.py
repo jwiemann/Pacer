@@ -484,21 +484,68 @@ def test_openrouter_below_the_limit_and_keys_without_limit_pause_nothing(fake):
     assert fake.posted("pause") == []
 
 
-def test_manual_switch_pauses_and_resumes_one_provider(fake):
-    set_settings()
-    claude = fake.add_agent("Atlas", CLAUDE)
-    eli = fake.add_agent("Eli", OPENCODE)
-    fake.set_usage(five=10, seven=10)
+def status():
+    with open(governor.STATUS, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def request(**states):
+    """The dashboard's manual switch: provider -> "on" / "off"."""
     with open(governor.SETTINGS, encoding="utf-8") as f:
         cfg = json.load(f)
     with open(governor.SETTINGS, "w", encoding="utf-8") as f:
-        json.dump({**cfg, "agentsOff": ["claude"]}, f)
+        json.dump({**cfg, "agentsRequest": states}, f)
+
+
+def test_status_counts_what_paperclip_has(fake):
+    set_settings()
+    fake.add_agent("Atlas", CLAUDE)
+    fake.add_agent("Eli", OPENCODE)
+    fake.set_usage(five=75, seven=20)
     tick_ok()
-    assert fake.status(claude) == "paused" and fake.status(eli) == "active"
-    assert sub()["reason"] == "manual"
-    tick_ok()  # stays paused
-    assert fake.posted("pause") == [claude]
-    with open(governor.SETTINGS, "w", encoding="utf-8") as f:
-        json.dump({**cfg, "agentsOff": []}, f)
+    p = status()["providers"]
+    assert p["claude"]["agents"] == {"total": 1, "paused": 1} and p["claude"]["override"] is None
+    assert p["copilot"]["agents"] == {"total": 0, "paused": 0}
+
+
+def test_manual_off_holds_while_the_limits_say_run(fake):
+    set_settings()
+    atlas = fake.add_agent("Atlas", CLAUDE)
+    fake.set_usage(five=10, seven=10)
+    request(claude="off")
     tick_ok()
-    assert fake.status(claude) == "active" and sub()["mode"] == "active"
+    assert fake.status(atlas) == "paused"
+    p = status()["providers"]["claude"]
+    assert p["override"] == "off" and p["mode"] == "paused" and p["rule"]["mode"] == "active"
+    assert p["agents"] == {"total": 1, "paused": 1}
+    with open(governor.SETTINGS, encoding="utf-8") as f:
+        assert not json.load(f).get("agentsRequest")  # carried out: the request is gone
+    tick_ok()  # the limits still say run: the switch stays
+    assert fake.status(atlas) == "paused" and fake.posted("resume") == []
+    fake.set_usage(five=80, seven=10)  # the verdict changes: the switch ends, the limits take over
+    tick_ok()
+    assert fake.status(atlas) == "paused" and status()["providers"]["claude"]["override"] is None
+    fake.set_usage(five=10, seven=10)
+    tick_ok()
+    assert fake.status(atlas) == "active"
+
+
+def test_manual_on_overrides_the_limit_until_it_clears(fake):
+    set_settings()
+    atlas = fake.add_agent("Atlas", CLAUDE)
+    fake.set_usage(five=80, seven=10)
+    tick_ok()
+    assert fake.status(atlas) == "paused"
+    request(claude="on")
+    tick_ok()
+    assert fake.status(atlas) == "active"
+    p = status()["providers"]["claude"]
+    assert p["override"] == "on" and p["mode"] == "active" and p["rule"]["mode"] == "paused"
+    tick_ok()  # still over the limit: the agents are not paused again
+    assert fake.status(atlas) == "active"
+    fake.set_usage(five=10, seven=10)
+    tick_ok()
+    assert fake.status(atlas) == "active" and status()["providers"]["claude"]["override"] is None
+    fake.set_usage(five=80, seven=10)
+    tick_ok()
+    assert fake.status(atlas) == "paused"

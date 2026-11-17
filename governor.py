@@ -59,7 +59,8 @@ class Governor:
         self.dry, self.fake = dry, fake
         self.cfg = pacer_config.get()
         self.live = None  # agent ids with a live run, fetched once per tick when a provider has to pause
-        self.off = set()  # providers whose agents the user switched off by hand (read each tick)
+        self.counts = {}  # provider -> {"total", "paused"}: what Paperclip has after this tick (empty without Paperclip)
+        self.requests = {}  # provider -> "on" / "off": manual switches the dashboard asked for (read each tick)
 
     # ---- plumbing
     def log(self, msg):
@@ -85,12 +86,19 @@ class Governor:
             fsutil.write_json_atomic(STATE, st, indent=2)
 
     def write_status(self, st, settings, usage):
-        """Status for the tray and the dashboard: every provider's sub-state with the settings it was decided on, and
-        the overall mode (the worst sub-state)."""
+        """Status for the tray and the dashboard. Per provider: "mode" / "reason" = what its agents do (a manual switch
+        counts), "rule" = what the limits say, "override" = the manual switch ("on" / "off") or None, "agents" = how
+        many of them Paperclip has and how many are paused (None while Paperclip is not reachable), and the settings it
+        was decided on. Top level: the overall mode (the worst sub-state)."""
         if self.dry:
             return
-        providers = {n: {"mode": st["providers"][n]["mode"], "reason": st["providers"][n].get("reason"), **settings[n]}
-                     for n in throttle.PROVIDERS}
+        providers = {}
+        for n in throttle.PROVIDERS:
+            p = st["providers"][n]
+            ov = (p.get("override") or {}).get("state")
+            mode, reason = ({"on": ("active", "manual"), "off": ("paused", "manual")}[ov] if ov else (p["mode"], p.get("reason")))
+            providers[n] = {"mode": mode, "reason": reason, "rule": {"mode": p["mode"], "reason": p.get("reason")}, "override": ov,
+                            "agents": self.counts.get(n), **settings[n]}
         fsutil.write_json_atomic(STATUS, {"at": logutil.iso_now(), "mode": throttle.overall(p["mode"] for p in providers.values()),
                                           "providers": providers, "usage": usage}, indent=2)
 
@@ -224,7 +232,8 @@ class Governor:
     def tick(self):
         st = self.load_state()
         cfg = self.read_settings(st)
-        self.off = throttle.agents_off(cfg)
+        self.requests = throttle.agent_requests(cfg)
+        self.counts = {}
         # Without Paperclip (no install detected and no settings.paperclip = true) the governor only watches the Claude
         # limits: it reads the usage and writes the status file, and never pauses anything.
         with_pc = (cfg["paperclip"] is True) if "paperclip" in cfg else bool(self.cfg.get("wslDistro"))
@@ -288,7 +297,12 @@ class Governor:
             desc["openrouter"] = f"key limit {w['usage']:g}%" + (f" (resets {w['reset']})" if w["reset"] else " (never resets)")
         for name in throttle.PROVIDERS:
             self.govern(name, st["providers"][name], settings[name], readings[name], agents, company,
-                        desc.get(name), unknown and name == "claude")
+                        desc.get(name), unknown and name == "claude", self.requests.get(name))
+        for n in throttle.PROVIDERS:
+            own = [a for a in agents if throttle.provider_of(a) == n]
+            self.counts[n] = {"total": len(own), "paused": sum(a.get("status") == "paused" for a in own)}
+        if self.requests and not self.dry:
+            paperclip_common.clear_agent_requests(self.requests)  # carried out; a newer request for a provider stays
         self.write_status(st, settings, usage)
         self.save_state(st)
 
@@ -320,41 +334,67 @@ class Governor:
         span = os_.get("span")
         return [{"usage": os_["used"], "reset": os_.get("resets"), "key": "or", "span": span, "early": span * 0.05 if span else None}]
 
-    def govern(self, name, ps, s, windows, agents, company, desc, unknown):
+    def set_agent(self, a, paused):
+        """Pause or resume one agent; the local copy follows, so the status file counts what Paperclip now has."""
+        if not self.dry:
+            self.pc("POST", f"/agents/{a['id']}/{'pause' if paused else 'resume'}")
+        a["status"] = "paused" if paused else "idle"
+
+    def govern(self, name, ps, s, windows, agents, company, desc, unknown, request=None):
         """Decide and apply one provider's sub-state. Only that provider's agents pause and resume with its limits;
         agents of no known provider are never paused, and one the governor paused earlier is resumed at once. Nothing
-        is handed to another agent. Only agents the governor paused itself are resumed again."""
+        is handed to another agent. Only agents the governor paused itself are resumed again.
+
+        request "on" / "off": the user flipped the switch of this provider's agents. All of them are resumed / paused
+        now. When that contradicts the limits (on while they say pause, off while they say run) it becomes an
+        override that holds until the limits change their verdict."""
         mine = set(ps.get("pausedAgents") or [])
-        if name in self.off:
-            self.switch_off(name, ps, agents)
-            return
-        if ps.get("reason") == "manual":  # switched on again: resume what the switch paused, then the limits decide as usual
-            self.resume_mine(agents, mine)
-            ps.update(mode="active", reason=None)
-            ps["pausedAgents"] = sorted(mine)
         for a in agents:
             if throttle.provider_of(a) != name and a.get("status") == "paused" and a["id"] in mine:
                 self.log(f"resuming {a['name']} (not on the {throttle.LABEL[name]} budget)")
-                if not self.dry:
-                    self.pc("POST", f"/agents/{a['id']}/resume")
+                self.set_agent(a, False)
                 mine.discard(a["id"])
         ps["pausedAgents"] = sorted(mine)
-        if windows is None:
-            return
         agents = [a for a in agents if throttle.provider_of(a) == name]
         if not agents:  # nobody to pause: this provider cannot hold the overall state
-            ps.update(mode="active", reason=None, pausedAgents=[])
+            if windows is not None:
+                ps.update(mode="active", reason=None, pausedAgents=[])
+            ps.pop("override", None)
             return
         mode = ps.get("mode", "active")
-        if windows or unknown:
-            target, reason = throttle.decide(mode, ps.get("reason"), windows, s, unknown)
+        if windows is None:  # no usable reading: the last verdict stands
+            target, reason = "active" if mode == "active" else "paused", ps.get("reason")
         else:
-            target, reason = "active", None  # not throttled
-        hold = max((w["usage"] for w in windows), default=100)
-        if desc is None:
-            desc = f"month {hold:g}% (resets {windows[0]['reset']})" if windows else "not throttled"
-        self.log(f"{name}: {desc}; mode={mode} target={target}{f' ({reason})' if reason else ''}")
-        ps["reason"] = reason
+            if windows or unknown:
+                target, reason = throttle.decide(mode, ps.get("reason"), windows, s, unknown)
+            else:
+                target, reason = "active", None  # not throttled
+            hold = max((w["usage"] for w in windows), default=100)
+            if desc is None:
+                desc = f"month {hold:g}% (resets {windows[0]['reset']})" if windows else "not throttled"
+            self.log(f"{name}: {desc}; mode={mode} target={target}{f' ({reason})' if reason else ''}")
+            ps["reason"] = reason
+        ov = ps.get("override")
+        if request:
+            self.log(f"{name}: agents switched {request} by hand")
+            for a in agents:
+                if (a.get("status") == "paused") == (request == "on"):
+                    self.log(f"{'resuming' if request == 'on' else 'pausing'} {a['name']}")
+                    self.set_agent(a, request == "off")
+            mine = set() if request == "on" else {a["id"] for a in agents}
+            ov = {"state": request, "against": target} if (request == "on") == (target != "active") else None
+        elif ov and ov["against"] != target:
+            self.log(f"{name}: the limits changed their verdict, the manual switch ends")
+            ov = None
+        if ov:
+            ps["override"] = ov
+        else:
+            ps.pop("override", None)
+        if ov or windows is None:  # the limits keep their verdict (and hysteresis), but do not touch the agents
+            if windows is not None:
+                ps["mode"] = "active" if target == "active" else "paused"
+            ps["pausedAgents"] = sorted(mine)
+            return
         if target != "active":
             if self.live is None:
                 self.live = {r["agentId"] for r in self.live_runs(company)}
@@ -368,8 +408,7 @@ class Governor:
                     draining += 1  # let the running run finish
                     continue
                 self.log(f"pausing {a['name']}{' (HARD limit: cancelling live run)' if a['id'] in self.live else ''}")
-                if not self.dry:
-                    self.pc("POST", f"/agents/{a['id']}/pause")
+                self.set_agent(a, True)
                 mine.add(a["id"])
             if draining:
                 self.log(f"draining: {draining} agent(s) with a live run, pausing once they finish (hard stop at {hard_at}%)")
@@ -380,32 +419,9 @@ class Governor:
                 if a.get("status") != "paused" or a["id"] not in mine:
                     continue
                 self.log(f"resuming {a['name']}")
-                if not self.dry:
-                    self.pc("POST", f"/agents/{a['id']}/resume")
+                self.set_agent(a, False)
             mine.clear()
         ps["pausedAgents"] = sorted(mine)
-
-
-    def resume_mine(self, agents, mine):
-        """Resume the agents in `mine` that are still paused; `mine` ends empty."""
-        for a in agents:
-            if a.get("status") == "paused" and a["id"] in mine:
-                self.log(f"resuming {a['name']}")
-                if not self.dry:
-                    self.pc("POST", f"/agents/{a['id']}/resume")
-        mine.clear()
-
-    def switch_off(self, name, ps, agents):
-        """The user switched this provider's agents off: pause them all at once (live runs too), and keep them paused."""
-        mine = set(ps.get("pausedAgents") or [])
-        for a in agents:
-            if throttle.provider_of(a) != name or a.get("status") == "paused":
-                continue
-            self.log(f"pausing {a['name']} ({throttle.LABEL[name]} agents switched off)")
-            if not self.dry:
-                self.pc("POST", f"/agents/{a['id']}/pause")
-            mine.add(a["id"])
-        ps.update(mode="paused", reason="manual", pausedAgents=sorted(mine))
 
 
 def run(dry=False, fake=None):

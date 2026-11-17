@@ -28,10 +28,10 @@ def _pct(v):
     return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 100
 
 
-def agents_off(cfg):
-    """Providers whose agents the user switched off by hand (settings key agentsOff)."""
-    off = (cfg or {}).get("agentsOff")
-    return {n for n in off if n in PROVIDERS} if isinstance(off, list) else set()
+def agent_requests(cfg):
+    """Manual switches of agent groups waiting for the governor (settings key agentsRequest: provider -> "on" / "off")."""
+    raw = (cfg or {}).get("agentsRequest")
+    return {n: v for n, v in raw.items() if n in PROVIDERS and v in ("on", "off")} if isinstance(raw, dict) else {}
 
 
 def settings_for(cfg, name):

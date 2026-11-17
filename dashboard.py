@@ -26,8 +26,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tray_icon  # noqa: E402
 from paperclip_common import (CFG, DIR, LOGS, URL, CLAUDE_EXE, SPAN_S, CHECK_FLAG, read_status, migrate_settings,  # noqa: E402
                               read_settings, write_settings, full_budget, provider_settings, keep_awake, sleep_when_idle,
-                              fmt_min, evaluate, paperclip_enabled)
+                              fmt_min, evaluate, paperclip_enabled, request_agents)
 import copilot_monitor, openrouter_monitor, throttle  # noqa: E402
+from flow_card import FlowCard  # noqa: E402
 import autostart  # noqa: E402
 import i18n  # noqa: E402
 from pacer_config import wsl_cmd  # noqa: E402
@@ -52,13 +53,10 @@ CHART_MIN_H = 110            # smallest chart height; defines the minimum window
 COL_MIN = 270                # smallest width of one of the two columns
 WIDE_MIN = 2 * COL_MIN + 4 * PAD  # narrower than this: compact layout (tabs as tiles above the chart, icon buttons, one column)
 LIVE_LAYOUT = [("claude", "Claude", BLUE), ("copilot", "Copilot", VIOLET), ("openrouter", "OpenRouter", "#4ec9b0")]
-COPILOT_ROWS = ("Copilot agents", "Copilot login", "Copilot usage", "Copilot resets")
-OPENROUTER_ROWS = ("OpenRouter agents", "OpenRouter key", "OpenRouter usage", "OpenRouter resets")
 SYMBOLS = {"OK": "\u2713", "healthy": "\u2713", "up to date": "\u2713", "FAILED": "\u2717", "DOWN": "\u2717",
            "Too fast": "\u25b2", "Too slow": "\u25bc", "At limit": "\u25a0", "Too early to tell": "\u2026",
            "unlimited": "\u221e", "unknown": "?", "not run yet": "\u2013", "tray not running": "\u2013",
            "running": "\u2713", "paused": "\u23f8", "draining": "\u25bc"}
-PAPERCLIP_ROWS = ("Claude agents", "Copilot agents", "OpenRouter agents", "Watchdog", "Server", "Paperclip")
 LIVE_PAL = {"fg": FG, "muted": MUTED, "grid": GRID, "bg": PANEL,
            "tint": {"claude": AREA, "copilot": "#352e4a", "openrouter": "#2c4a45"}, "reset5h": WARN, "reset7d": GOOD}
 LIVE_LEVELS = ((60, 1, 5), (300, 5, 30), (3600, 30, 120), (6 * 3600, 120, 600), (24 * 3600, 300, 1800))  # window, point step, averaging (s)
@@ -177,59 +175,18 @@ class Dashboard:
         pace.bind("<Configure>", fit_headline)
         self.f_small = tkfont.Font(family="Segoe UI", size=8)
 
-        # status (health, throughput, resets) | accounts (logins) on the right, settings below them
-        def rows(frame, keys):
-            """Label / value rows from grid row 1; a key starting with '#' is a section header (hidden with its provider)."""
-            for r, key in enumerate(keys, 1):
-                if key.startswith("#"):
-                    hdr = self.heads[key[1:]] = tk.Label(frame, text=key[1:], bg=PANEL, fg=MUTED, font=mono(8, True))
-                    hdr.grid(row=r, column=0, columnspan=2, sticky="w", pady=(0 if r == 1 else 14, 0))
-                    hdr.sep = None if r == 1 else tk.Frame(frame, bg=BORDER, height=1)  # divider above every section but the first
-                    if hdr.sep:
-                        hdr.sep.grid(row=r, column=0, columnspan=2, sticky="new", pady=(5, 0))
-                    continue
-                self.lbls[key] = tk.Label(frame, text=key, bg=PANEL, fg=MUTED, font=("Segoe UI", 9))
-                self.lbls[key].grid(row=r, column=0, sticky="w", pady=2)
-                self.vals[key] = tk.Label(frame, bg=PANEL, fg=FG, font=mono(9), anchor="w")
-                self.vals[key].grid(row=r, column=1, sticky="w", padx=(GAP, 0), pady=2)
-
+        # status -> governor rule check -> agent switch: one card, one lane per provider (flow_card.py)
         self.heads = {}
-        st = self.st = panel("Status", card=True)
-        st.columnconfigure(1, weight=1)
-        rows(st, ("#CLAUDE", "Claude login", "Throughput 5h", "Throughput 7d", "Resets 5h", "Resets 7d",
-                  "#COPILOT", "Copilot login", "Copilot usage", "Copilot resets",
-                  "#OPENROUTER", "OpenRouter key", "OpenRouter usage", "OpenRouter resets"))
-        svc = self.svc = panel("Services", card=True)
-        svc.columnconfigure(1, weight=1)
-        rows(svc, ("Governor", "Watchdog", "Server", "Paperclip"))
-        # the Paperclip row holds either the status text or, while an update is available, the update button
-        self.vals["Paperclip"].destroy()
-        pc = tk.Frame(svc, bg=PANEL)
-        pc.grid(row=4, column=1, sticky="w", padx=(GAP, 0), pady=2)
-        self.pc_frame = pc
-        self.vals["Paperclip"] = tk.Label(pc, bg=PANEL, fg=FG, font=mono(9), anchor="w")
-        self.vals["Paperclip"].grid(row=0, column=0, sticky="w")
-        self.upd_btn = button(pc, "Update Paperclip", self.start_update, pad=(10, 2))
-        self.upd_btn.grid(row=0, column=0, sticky="w")
-        self.upd_btn.grid_remove()
+        st = self.st = panel(card=True)
+        self.flow = FlowCard(self, st, self.toggle_agents, self.start_update)
+        self.pc_frame, self.upd_btn = self.flow.pc_frame, self.flow.upd_btn
         self.upd_armed, self.upd_offer = 0.0, None  # confirm-click time; label currently offered on the button
-        ag = self.agents = panel("Agents", card=True)  # run state of each provider's agents, below the services
-        ag.columnconfigure(1, weight=1)
-        rows(ag, ("Claude agents", "Copilot agents", "OpenRouter agents"))
-        self.ag_sw, self.ag_on = {}, {}  # per provider: the on/off switch of its agents (off = paused by hand) and its variable
-        for r, name in enumerate(throttle.PROVIDERS, 1):
-            key = f"{throttle.LABEL[name]} agents"
-            self.ag_on[name] = tk.BooleanVar(value=True)
-            sw = self.ag_sw[key] = Switch(ag, "", self.ag_on[name], lambda n=name: self.toggle_agents(n))
-            sw.grid(row=r, column=2, sticky="e", padx=(GAP, 0), pady=2)
-            sw.bind("<Enter>", lambda e, n=name: self.show_tip(e, f"Switch the {throttle.LABEL[n]} agents in Paperclip on or off by hand."))
-            sw.bind("<Leave>", self.hide_tip)
+        self.agent_req = {}  # provider -> (state, time) of a switch flipped but not yet carried out by the governor
         self.align_details()
 
         self.tips, self.tip, self.sym_tip = {}, None, {}  # hover texts per Status row; the spelled-out status behind a symbol
         for k in ("Governor", "Watchdog", "Server", "Paperclip", "Throughput 5h", "Throughput 7d", "Claude login", "Copilot login",
-                  "OpenRouter key", "Copilot usage", "OpenRouter usage", "Resets 5h", "Resets 7d", "Copilot resets", "OpenRouter resets",
-                  "Claude agents", "Copilot agents", "OpenRouter agents"):
+                  "OpenRouter key", "Copilot usage", "OpenRouter usage", "Resets 5h", "Resets 7d", "Copilot resets", "OpenRouter resets"):
             self.vals[k].bind("<Enter>", lambda e, k=k: self.show_tip(e, self.tip_text(k)))
             self.vals[k].bind("<Leave>", self.hide_tip)
         for w in [self.upd_btn] + list(self.upd_btn.winfo_children()) + list(self.upd_btn.winfo_children()[0].winfo_children()):
@@ -330,6 +287,7 @@ class Dashboard:
         self.live.start()
         self.refresh()
         self.live_tick()
+        self.anim_tick()
         # the narrow layout defines the minimum width; the window then starts in the layout its width asks for
         self.compact = True
         self.apply_layout()
@@ -389,24 +347,17 @@ class Dashboard:
                 b.set_icon_only(c)
         self.place_page()
 
+    def place_flow(self):
+        self.flow.place(self.compact, self.pc_on, {"claude": True, "copilot": self.cop_on, "openrouter": self.or_on})
+
     def place_details(self):
-        """Status panel (left) and Services + Agents panels (right; stacked in one column when compact). The Agents panel
-        belongs to Paperclip."""
-        m = PAD_COMPACT if self.compact else PAD
-        half = GAP // 2
-        panels = [self.st, self.svc] + ([self.agents] if self.pc_on else [])
-        for f in (self.st, self.svc, self.agents):
-            f.grid_remove()
+        """The Status card: status, governor rules and agent switches of every provider in one flow."""
+        self.place_flow()
+        self.st.grid_remove()
         if not self.details or self.tabs_only:
             return
-        if self.compact:
-            for r, f in enumerate(panels, 1):
-                f.grid(row=r, column=0, columnspan=2, rowspan=1, sticky="nsew", padx=m, pady=half)
-        else:
-            self.st.grid(row=1, column=0, columnspan=1, rowspan=2, sticky="nsew", padx=(PAD, half), pady=half)
-            self.svc.grid(row=1, column=1, columnspan=1, rowspan=1, sticky="nsew", padx=(half, PAD), pady=half)
-            if self.pc_on:
-                self.agents.grid(row=2, column=1, columnspan=1, rowspan=1, sticky="nsew", padx=(half, PAD), pady=half)
+        m = PAD if not self.compact else PAD_COMPACT
+        self.st.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=m, pady=GAP // 2)
 
     def place_page(self):
         """Settings page: header (back, title, Apply while something is unsaved), the provider cards side by side (wide)
@@ -432,13 +383,11 @@ class Dashboard:
         self.msg.grid(row=row + 1, column=0, columnspan=2, sticky="w", padx=m + PAD, pady=(half, m))
 
     def details_height(self):
-        """Window height the Status / Services panels take in the current layout (0 while hidden)."""
+        """Window height the Status card takes in the current layout (0 while hidden)."""
         if not self.details:
             return 0
         self.root.update_idletasks()
-        st, svc = self.st.winfo_reqheight(), self.svc.winfo_reqheight()
-        ag = self.agents.winfo_reqheight() + GAP if self.pc_on else 0
-        return st + svc + ag + 2 * GAP if self.compact else max(st, svc + ag) + GAP
+        return self.st.winfo_reqheight() + GAP
 
     def fit_minsize(self):
         """Minimum window size of the current layout: everything visible with the chart at its smallest (the whole
@@ -458,7 +407,7 @@ class Dashboard:
         root, pace = self.root, self.pace
         for col in (0, 1):
             root.columnconfigure(col, weight=1, uniform="col", minsize=0)
-        for w in (self.big_box, self.vdiv, self.headline, self.chart, self.bar, self.st, self.svc, self.agents):
+        for w in (self.big_box, self.vdiv, self.headline, self.chart, self.bar, self.st):
             w.grid_remove()
         pace.config(padx=0, pady=0, highlightthickness=0)
         pace.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
@@ -837,6 +786,15 @@ class Dashboard:
             LOGGER.error("dashboard live\n%s", traceback.format_exc().rstrip())
         self.root.after(125 if self.sel == "live" else 1000, self.live_tick)
 
+    def anim_tick(self):
+        """About 25 times a second: the balls on the lines of the Status card."""
+        try:
+            if self.details and not self.tabs_only and not self.page_open:
+                self.flow.tick(time.monotonic())
+        except Exception:
+            LOGGER.error("dashboard animation\n%s", traceback.format_exc().rstrip())
+        self.root.after(40, self.anim_tick)
+
     def close(self):
         try:
             self.store_geometry()
@@ -1080,16 +1038,9 @@ class Dashboard:
         self.place_rows()
 
     def place_rows(self):
-        """Status / Services rows and settings cards that belong to Copilot or to Paperclip show only while those are in use."""
-        for k, lbl in self.lbls.items():
-            on = ((self.cop_on or k not in COPILOT_ROWS) and (self.or_on or k not in OPENROUTER_ROWS)
-                  and (self.pc_on or k not in PAPERCLIP_ROWS))
-            for w in (lbl, self.pc_frame if k == "Paperclip" else self.vals[k]) + ((self.ag_sw[k],) if k in self.ag_sw else ()):
-                w.grid() if on else w.grid_remove()
-        for title, on in (("CLAUDE", True), ("COPILOT", self.cop_on), ("OPENROUTER", self.or_on)):
-            for w in (self.heads[title], self.heads[title].sep):
-                if w is not None:
-                    w.grid() if on else w.grid_remove()
+        """Provider lanes of the Status card and settings cards that belong to Copilot, OpenRouter or Paperclip show only
+        while those are in use."""
+        self.place_flow()
         self.place_page()
         if hasattr(self, "min_w"):
             self.place_details()
@@ -1151,12 +1102,11 @@ class Dashboard:
             self.vals[key].config(text=glyph + sep + rest, fg=color, font=("Segoe UI Symbol", 10, "bold"))
 
     def align_details(self):
-        """Status, Services and Agents give their label column the width of the widest label of all three, so the values
-        start at the same distance from the left edge of every card (again after a language change)."""
+        """The Status card's label column gets the width of its widest label, so the values start at the same distance
+        from the left edge in every lane (again after a language change)."""
         self.root.update_idletasks()
-        width = max(lbl.winfo_reqwidth() for lbl in self.lbls.values())
-        for card in (self.st, self.svc, self.agents):
-            card.columnconfigure(0, minsize=width)
+        self.st.columnconfigure(0, minsize=max(lbl.winfo_reqwidth() for lbl in self.lbls.values()))
+        self.flow.relayout()
 
     def set_language(self, lang):
         write_settings(lang=lang)
@@ -1272,11 +1222,60 @@ class Dashboard:
         self.flash("PC may sleep 10 min after Paperclip goes idle" if on else "PC stays awake while 'Keep PC awake' is on", GOOD)
 
     def toggle_agents(self, name):
-        """Manual switch of one provider's agents: saved at once, the governor pauses or resumes them in an immediate tick."""
-        off = [n for n in throttle.PROVIDERS if not self.ag_on[n].get()]
-        write_settings(agentsOff=off)
+        """The user flipped the switch of one provider's agents: ask the governor, and show the wish until it did it."""
+        state = "on" if self.flow.lanes[name]["var"].get() else "off"
+        request_agents(name, state)
+        self.agent_req[name] = (state, time.time())
         self.check_now()
-        self.flash(f"{throttle.LABEL[name]} agents switched {'on' if self.ag_on[name].get() else 'off'}", GOOD)
+        self.refresh()
+
+    def update_lane(self, name, sub, usage, color, status_at, pc_on):
+        """One provider's lane: the governor's rule check (its verdict and the numbers behind it) and the agent switch,
+        which shows what Paperclip has (a switch flipped just now shows the wish until the governor has carried it out).
+        `sub`: the provider's part of the governor status, `usage` / `color`: its newest reading and verdict colour."""
+        cfg, fb = provider_settings(name), full_budget(name)
+        pause, resume, _hard = throttle.limits({**cfg, "fullBudget": fb})
+        rule = sub.get("rule") or {"mode": sub.get("mode"), "reason": sub.get("reason")}
+        rmode, reason = rule.get("mode"), rule.get("reason")
+        blocked = rmode not in (None, "active")
+        head, hcolor = ("-", MUTED) if rmode is None else ("block", BAD) if blocked else ("allow", GOOD)
+        nums, notes = "-", ["", ""]
+        if usage is not None:
+            ref = resume if blocked and usage < pause else pause  # a blocked provider stays blocked until it is below `resume`
+            op = "\u2265" if usage >= ref else "<"
+            nums = f"{usage:.1f}".removesuffix(".0") + f"% {op} {ref}%"  # one decimal at most: the box is narrow
+        if blocked:
+            notes = [{"limit": "limit reached", "pace": "too fast", "unknown": "no usage reading"}.get(reason, ""),
+                     {"limit": f"resume below {resume}%", "pace": "until back on plan"}.get(reason, "")]
+        elif rmode == "active":
+            notes = ["limit 100%" if fb else f"pause at {pause}%", "or too fast" if cfg["byPace"] else ""]
+        tip = "\n".join(["full budget: pause at 100%" if fb else f"pause at {pause}%"] + ([] if fb else [f"resume below {resume}%"])
+                        + (["Pause when too fast"] if cfg["byPace"] else []))
+
+        ag, ov = sub.get("agents"), sub.get("override")
+        running = None if ag is None else ag["total"] - ag["paused"]
+        pend = self.agent_req.get(name)
+        if pend and ((status_at >= pend[1] and ((running or 0) > 0) == (pend[0] == "on")) or time.time() - pend[1] > 90):
+            del self.agent_req[name]  # carried out (or given up): show what Paperclip has again
+            pend = None
+        out = ("idle", MUTED)
+        if pend:
+            on, enabled, label, lcolor, atip = pend[0] == "on", True, "...", MUTED, ""
+        elif not pc_on or ag is None:
+            on, enabled, label, lcolor, atip = False, False, "-", MUTED, "Paperclip is not reachable"
+        elif ag["total"] == 0:
+            on, enabled, label, lcolor, atip = False, False, "no agents", MUTED, ""
+        else:
+            on, enabled = running > 0, True
+            label, lcolor = (("draining", WARN) if sub.get("mode") == "draining" and on else ("running", GOOD) if running == ag["total"]
+                             else ("paused", WARN) if not on else (f"{running}/{ag['total']} running", WARN))
+            atip = f"{running} of {ag['total']} agents running"
+            if ov:
+                atip += "\n" + {"on": "switched on by hand, although the limits say pause", "off": "switched off by hand"}[ov]
+            lcolor = WARN if ov else lcolor
+            out = (("go", WARN) if ov == "on" else ("stop", WARN) if ov == "off" else ("stop", BAD) if blocked else ("go", GOOD))
+        self.flow.set_rule(name, head, hcolor, nums, color, notes, tip, None if usage is None else "go", color)
+        self.flow.set_agents(name, on, enabled, label, lcolor, atip, *out)
 
     def toggle_ka(self):
         """Keep-awake applies at once (no Apply step): the tray polls the settings file and holds the wake lock."""
@@ -1502,7 +1501,7 @@ class Dashboard:
                 if (j.get("at") or 0) >= self.check_req or time.time() - self.check_req > 120:
                     self.check_req = None
                 else:
-                    t += "  \u00b7 check requested"
+                    t, c = "checking...", BLUE  # short: the governor sits in a narrow column
             self.put(key, t, c)
         if pc_on:
             self.put("Server", "unknown" if srv is None else "healthy" if srv else "DOWN",
@@ -1564,17 +1563,13 @@ class Dashboard:
             self.tips["OpenRouter resets"] = dt.astimezone().strftime("%a %d.%m. %H:%M")
         self.vals["OpenRouter resets"].config(text=txt)
 
-        # agents of each provider: its sub-state
-        for name, key in (("claude", "Claude agents"), ("copilot", "Copilot agents"), ("openrouter", "OpenRouter agents")):
-            mode = subs[name].get("mode")
-            self.tips[key] = "" if mode in (None, "active") else {
-                "pace": "usage is ahead of the plan", "limit": "limit reached",
-                "unknown": "no usage reading", "manual": "switched off by hand"}.get(subs[name].get("reason"), "")
-            self.put(key, mode and {"active": "running"}.get(mode, mode) or "-",
-                     {"active": GOOD, None: MUTED}.get(mode, WARN))
-        off = throttle.agents_off(read_settings())
+        # per provider: the rule check and the switch of its agents
+        status_at = datetime.fromisoformat(s["at"].replace("Z", "+00:00")).timestamp() if s and s.get("at") else 0
+        feeds = {"claude": (max((v for v in (u.get("five"), u.get("seven")) if v is not None), default=None), info[limiting][2]),
+                 "copilot": (cp_usage, cp_color), "openrouter": (or_usage, or_color)}
         for name in throttle.PROVIDERS:
-            self.ag_on[name].set(name not in off)
+            self.update_lane(name, subs[name], *feeds[name], status_at, pc_on)
+        self.flow.refresh_lines()
 
         # settings (do not clobber a pending change)
         for name, pv in self.prov.items():

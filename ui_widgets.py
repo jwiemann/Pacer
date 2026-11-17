@@ -193,7 +193,7 @@ class Switch(tk.Frame):
 
     def __init__(self, parent, text, var, command):
         super().__init__(parent, bg=PANEL, cursor="hand2")
-        self.var, self.command, self.enabled = var, command, True
+        self.var, self.command, self.enabled, self.fg = var, command, True, FG
         self.lbl = tk.Label(self, text=text, bg=PANEL, fg=FG, font=("Segoe UI", 9), anchor="w", cursor="hand2")
         self.cv = tk.Canvas(self, width=self.W, height=self.H, bg=PANEL, highlightthickness=0, cursor="hand2")
         self.lbl.pack(side="left", fill="x", expand=True)
@@ -211,7 +211,7 @@ class Switch(tk.Frame):
 
     def draw(self):
         """Move the knob to the variable's state (animated once shown) and grey the label when disabled."""
-        self.lbl.config(fg=FG if self.enabled else MUTED)
+        self.lbl.config(fg=self.fg if self.enabled else MUTED)
         goal = 1.0 if self.var.get() else 0.0
         if self.pos is None:
             self.pos = goal
@@ -251,6 +251,12 @@ class Switch(tk.Frame):
             self.draw()
         return super().configure(cnf, **kw) if (cnf or kw) else None
     config = configure
+
+    def set_label(self, text, fg=FG):
+        """Label text and colour (a state word such as 'running')."""
+        self.fg = fg
+        self.lbl.config(text=text)
+        self.draw()
 
     def bind(self, seq=None, func=None, add=None):
         for w in (self, self.lbl, self.cv):
@@ -338,3 +344,99 @@ class Tab:
         c.create_line(*flat, fill=color)
 
 
+class Link(tk.Canvas):
+    """Thin connector from the widgets on its left (`sources`) to one `target`, with small balls running along it in
+    that direction. Sources and target sit in the same grid as the canvas: their vertical centres are the line ends.
+    With `from_text` the canvas reaches over the source widgets and each line starts at the right end of its text.
+    Modes: "go" (the balls run to the target), "stop" (they run into a gate half way and vanish there), "idle" (the line
+    only). Colour = the balls. Time-driven: tick(t) places them."""
+    SPEED, SPACING, R, LINE = 34.0, 22.0, 2.5, "#4a505a"  # px/s, px between balls, ball radius, line colour
+
+    def __init__(self, parent, from_text=False):
+        super().__init__(parent, bg=PANEL, highlightthickness=0, width=1, height=1)
+        self.from_text, self.lane = from_text, 40  # lane: width of the free part right of the text (set by the owner)
+        self.sources, self.target = [], None
+        self.mode, self.color = "idle", MUTED
+        self.paths, self.balls, self.gate, self.gate_x, self.shown = [], [], None, 0, {}
+        self.bind("<Configure>", lambda _e: self.layout())
+
+    def connect(self, sources, target):
+        self.sources, self.target = list(sources), target
+        self.layout()
+
+    def set_flow(self, mode, color):
+        if (mode, color) != (self.mode, self.color):
+            self.mode, self.color = mode, color
+            self.paint()
+
+    def centre(self, w):
+        return w.winfo_y() + w.winfo_height() / 2 - self.winfo_y()
+
+    def layout(self):
+        """Redraw the lines for the current geometry (also needed when a source's text changed width)."""
+        self.delete("all")
+        self.paths, self.balls, self.gate, self.shown = [], [], None, {}
+        W = self.winfo_width()
+        if W < 12 or self.target is None or self.target.winfo_height() <= 1:
+            return
+        ty, end = self.centre(self.target), W - 7
+        starts = [(w.winfo_x() + w.winfo_reqwidth() + 4 - self.winfo_x() if self.from_text else 0, self.centre(w)) for w in self.sources]
+        bus = min(end - 6, W - self.lane / 2) if self.from_text else W * 0.4
+        for x0, y0 in starts:
+            pts = [(x0, y0), (bus, y0), (bus, ty), (end, ty)] if abs(y0 - ty) > 1 else [(x0, ty), (end, ty)]
+            self.create_line(*[c for p in pts for c in p], fill=self.LINE)
+            self.create_oval(x0 - 2, y0 - 2, x0 + 2, y0 + 2, fill=self.LINE, outline="")
+            cum = [0.0]
+            for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
+                cum.append(cum[-1] + abs(xb - xa) + abs(yb - ya))
+            self.paths.append((pts, cum))
+        self.create_polygon(end - 1, ty - 3.5, W, ty, end - 1, ty + 3.5, fill=self.LINE, outline="")
+        self.gate_x = (bus + end) / 2 if self.from_text else end / 2
+        self.gate = self.create_line(self.gate_x, ty - 7, self.gate_x, ty + 7, width=2, state="hidden")
+        for _pts, cum in self.paths:
+            self.balls.append([self.create_oval(0, 0, 0, 0, state="hidden", outline="") for _ in range(int(cum[-1] / self.SPACING) + 2)])
+        self.paint()
+
+    def paint(self):
+        for balls in self.balls:
+            for b in balls:
+                self.itemconfigure(b, fill=self.color)
+                if self.mode == "idle":
+                    self.show(b, False)
+        if self.gate is not None:
+            self.itemconfigure(self.gate, fill=self.color, state="normal" if self.mode == "stop" else "hidden")
+
+    def show(self, item, on):
+        if self.shown.get(item) != on:
+            self.shown[item] = on
+            self.itemconfigure(item, state="normal" if on else "hidden")
+
+    @staticmethod
+    def point(pts, cum, s):
+        """The point at distance s along a polyline (cum = distance at each vertex)."""
+        for i in range(1, len(cum)):
+            if s <= cum[i]:
+                (xa, ya), (xb, yb) = pts[i - 1], pts[i]
+                k = (s - cum[i - 1]) / ((cum[i] - cum[i - 1]) or 1)
+                return xa + (xb - xa) * k, ya + (yb - ya) * k
+        return pts[-1]
+
+    def tick(self, t):
+        """Move the balls to where they are at time t (seconds)."""
+        if self.mode == "idle" or not self.paths:
+            return
+        for n, ((pts, cum), balls) in enumerate(zip(self.paths, self.balls)):
+            base = (t * self.SPEED + n * self.SPACING / 3) % self.SPACING
+            limit = cum[-1]
+            if self.mode == "stop":  # run until the gate: the distance of the gate along this path
+                limit = next((cum[i - 1] + self.gate_x - pts[i - 1][0] for i in range(1, len(pts))
+                              if pts[i - 1][0] < self.gate_x <= pts[i][0]), limit)
+            for k, ball in enumerate(balls):
+                s = base + k * self.SPACING
+                if s >= limit:
+                    self.show(ball, False)
+                    continue
+                x, y = self.point(pts, cum, s)
+                r = self.R * max(0.25, min(1.0, (limit - s) / 8)) if self.mode == "stop" else self.R
+                self.coords(ball, x - r, y - r, x + r, y + r)
+                self.show(ball, True)

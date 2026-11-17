@@ -54,6 +54,24 @@ def paperclip_enabled():
     return bool(pref) if pref is not None else bool(CFG.get("wslDistro"))
 
 
+def request_agents(name, state):
+    """Asks the governor to switch one provider's agents "on" or "off" (it carries that out in its next tick)."""
+    with fsutil.file_lock(SETTINGS + ".lock"):
+        cfg = read_settings()
+        cfg["agentsRequest"] = {**throttle.agent_requests(cfg), name: state}
+        fsutil.write_json_atomic(SETTINGS, cfg)
+
+
+def clear_agent_requests(done):
+    """Removes the requests the governor has carried out; a newer request of the user for the same provider stays."""
+    with fsutil.file_lock(SETTINGS + ".lock"):
+        cfg = read_settings()
+        left = {n: v for n, v in throttle.agent_requests(cfg).items() if done.get(n) != v}
+        if left != throttle.agent_requests(cfg):
+            cfg["agentsRequest"] = left
+            fsutil.write_json_atomic(SETTINGS, cfg)
+
+
 def migrate_settings():
     """One-time move of the limits from before the split by provider into providers.claude (see throttle.migrate)."""
     if throttle.migrate(read_settings()) is None:

@@ -29,7 +29,7 @@ def set_lang(lang):
 
 EXACT = {
     # panels, tabs, rows
-    "Status": "Status", "Services": "Dienste", "Settings": "Einstellungen", "Month": "Monat",
+    "Status": "Status", "Settings": "Einstellungen", "Month": "Monat",
     "Claude login": "Claude-Login", "Copilot login": "Copilot-Login",
     "Throughput 5h": "Durchsatz 5h", "Throughput 7d": "Durchsatz 7d", "Copilot usage": "Copilot-Nutzung",
     "Resets 5h": "Reset 5h", "Resets 7d": "Reset 7d", "Copilot resets": "Copilot-Reset",
@@ -41,9 +41,12 @@ EXACT = {
     "The only limit is the real one: agents pause at 100%.": "Es gilt nur das echte Limit: Agenten pausieren bei 100%.",
     "Also pauses the agents while the usage runs clearly ahead of the plan (red), until it is back on the plan line.":
         "Pausiert die Agenten auch, solange die Nutzung deutlich über dem Plan liegt (rot), bis sie wieder auf der Planlinie ist.",
-    "Claude agents": "Claude-Agenten", "Copilot agents": "Copilot-Agenten", "OpenRouter agents": "OpenRouter-Agenten",
+    "allow": "erlaubt", "block": "gesperrt", "too fast": "zu schnell", "or too fast": "oder zu schnell",
+    "until back on plan": "bis wieder im Plan", "no agents": "keine Agenten", "Paperclip is not reachable": "Paperclip nicht erreichbar",
+    "switched on by hand, although the limits say pause": "von Hand eingeschaltet, obwohl die Limits Pause verlangen",
+    "switched off by hand": "von Hand ausgeschaltet",
     "running": "läuft", "paused": "pausiert", "draining": "läuft aus",
-    "usage is ahead of the plan": "Nutzung liegt über dem Plan", "limit reached": "Limit erreicht",
+    "limit reached": "Limit erreicht",
     "no usage reading": "kein Nutzungswert", "saved": "Gespeichert",
     "Split token graph by model": "Token-Graph nach Modell aufteilen",
     "The Tokens graph shows one band per model family (Opus, Sonnet, Haiku ...) instead of one area per provider.":
@@ -169,6 +172,9 @@ RULES = [
           + (" (wird angewendet...)" if m[4] else "") + (f" - Reset in {dur(m[5])}" if m[5] else "")),
     _rule(rf"reset in {DUR}", lambda m: f"Reset in {dur(m[1])}"),
     _rule(r"(Claude|Copilot|OpenRouter) (paused|draining)", lambda m: f"{m[1]} {STATES[m[2]]}"),
+    _rule(r"resume below (\d+)%", lambda m: f"fortsetzen unter {m[1]}%"),
+    _rule(r"(\d+)/(\d+) running", lambda m: f"{m[1]}/{m[2]} läuft"),
+    _rule(r"(\d+) of (\d+) agents running", lambda m: f"{m[1]} von {m[2]} Agenten laufen"),
 ]
 
 
