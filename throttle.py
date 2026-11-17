@@ -66,6 +66,24 @@ def limits(s):
     return s["pauseAt"], s["resumeBelow"], max(HARD_AT, s["pauseAt"])
 
 
+def ideal_five_rate(hist, thr, now, span7_s=7 * 86400):
+    """Pace of the 5h window, in 5h-percent per hour, that keeps the 7d window on its plan line (a steady burn that
+    reaches `thr` percent at the 7d reset). The two windows are tied by what the recent polls say: how many 7d percent
+    one 5h percent has cost (rises over the last 7 days; a 5h reset is skipped). None without enough history.
+    hist: [(epoch, five %, seven %)] oldest first."""
+    d5 = d7 = 0.0
+    for a, b in zip(hist, hist[1:]):
+        if b[0] < now - span7_s:
+            continue
+        x, y = b[1] - a[1], b[2] - a[2]
+        if x > 0 and y >= 0:
+            d5 += x
+            d7 += y
+    if d5 < 1 or d7 <= 0:
+        return None
+    return thr / (span7_s / 3600) / (d7 / d5)
+
+
 def provider_of(agent):
     """Provider whose budget a Paperclip agent runs on, or None (such agents are never paused by the Pacer)."""
     adapter = agent.get("adapterType")

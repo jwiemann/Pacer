@@ -41,7 +41,7 @@ EXACT = {
     "The only limit is the real one: agents pause at 100%.": "Es gilt nur das echte Limit: Agenten pausieren bei 100%.",
     "Also pauses the agents while the usage runs clearly ahead of the plan (red), until it is back on the plan line.":
         "Pausiert die Agenten auch, solange die Nutzung deutlich über dem Plan liegt (rot), bis sie wieder auf der Planlinie ist.",
-    "allow": "erlaubt", "block": "gesperrt", "too fast": "zu schnell", "or too fast": "oder zu schnell",
+    "7d plan": "7d-Plan", "allow": "erlaubt", "block": "gesperrt", "too fast": "zu schnell", "or too fast": "oder zu schnell",
     "until back on plan": "bis wieder im Plan", "no agents": "keine Agenten", "Paperclip is not reachable": "Paperclip nicht erreichbar",
     "switched on by hand, although the limits say pause": "von Hand eingeschaltet, obwohl die Limits Pause verlangen",
     "switched off by hand": "von Hand ausgeschaltet",

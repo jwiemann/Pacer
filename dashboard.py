@@ -1728,6 +1728,14 @@ class Dashboard:
             dots(xn, yn, xe, ye)
             c.create_text(W - R, ye + 16, text=f"{p['projected']:.0f}%", fill=color, font=small, anchor="ne")
 
+        # the 5h pace that keeps the 7d window on its plan line (see throttle.ideal_five_rate)
+        rate = throttle.ideal_five_rate(hist, thr, now) if win == "5h" else None
+        if rate and usage < 100:
+            t_end = min(end, now + (100 - usage) / rate * 3600)
+            ye = Y(usage + rate * (t_end - now) / 3600)
+            c.create_line(xn, yn, X(t_end), ye, fill=GOOD, dash=(3, 3))
+            c.create_text(min(X(t_end), W - R) - 4, ye - 4, text="7d plan", fill=GOOD, font=small, anchor="se")
+
         # gap to the plan line right now, in percentage points (rounded): + = ahead of plan (too much), - = budget left
         plan_now = thr * (min(max(now, start), end) - start) / span
         gap = round(usage - plan_now)
