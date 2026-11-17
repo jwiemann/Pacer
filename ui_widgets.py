@@ -389,18 +389,27 @@ class Link(tk.Canvas):
             self.create_oval(x0 - 2, y0 - 2, x0 + 2, y0 + 2, fill=self.LINE, outline="")
             self.routes["go"].append(self.route(pts))
             if self.from_text:  # "away": the tokens leave the lane downwards, to somewhere the Pacer cannot see
-                self.routes["away"].append(self.route([(x0, y0), (bus, y0), (bus, H - 4)]))
+                self.routes["away"].append(self.route([(x0, y0), (bus, y0), (bus, H - 2)]))
         self.create_polygon(end - 1, ty - 3.5, W, ty, end - 1, ty + 3.5, fill=self.LINE, outline="")
         self.gate_x = (bus + end) / 2 if self.from_text else end / 2
         self.gate = self.create_line(self.gate_x, ty - 7, self.gate_x, ty + 7, width=2, state="hidden")
         self.away_items = []
-        if self.from_text:
-            self.away_items = [self.create_line(bus, ty, bus, H - 8, dash=(2, 4), state="hidden"),
-                               self.create_polygon(bus - 3.5, H - 8, bus + 3.5, H - 8, bus, H - 1, state="hidden")]
+        if self.from_text:  # the way out: gray like the other lines, dotted, fading into the background
+            n, y1 = 8, H - 2
+            for i in range(n):
+                ya, yb = ty + (y1 - ty) * i / n, ty + (y1 - ty) * (i + 1) / n
+                self.away_items.append(self.create_line(bus, ya, bus, yb, dash=(2, 4), state="hidden",
+                                                        fill=self.fade(self.LINE, i / n)))
         for kind, routes in self.routes.items():
             self.balls[kind] = [[self.create_oval(0, 0, 0, 0, state="hidden", outline="") for _ in range(int(cum[-1] / self.MIN_SP) + 2)]
                                 for _pts, cum in routes]
         self.paint()
+
+    @staticmethod
+    def fade(color, k):
+        """`color` mixed k (0..1) of the way into the panel colour."""
+        a, b = (tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in (color, PANEL))
+        return "#%02x%02x%02x" % tuple(round(x + (y - x) * k) for x, y in zip(a, b))
 
     @staticmethod
     def route(pts):
@@ -418,7 +427,7 @@ class Link(tk.Canvas):
         if self.gate is not None:
             self.itemconfigure(self.gate, fill=self.color, state="normal" if self.mode == "stop" else "hidden")
         for item in getattr(self, "away_items", []):
-            self.itemconfigure(item, fill=self.color, state="normal" if self.mode == "away" else "hidden")
+            self.itemconfigure(item, state="normal" if self.mode == "away" else "hidden")
 
     def show(self, item, on):
         if self.shown.get(item) != on:
@@ -451,5 +460,9 @@ class Link(tk.Canvas):
                         self.show(ball, False)
                         continue
                     x, y = self.point(pts, cum, s)
-                    self.coords(ball, x - r, y - r, x + r, y + r)
+                    f = min(1.0, max(0.0, (s - cum[1]) / ((cum[2] - cum[1]) or 1))) if k_ == "away" else 0.0  # fading while it leaves
+                    if k_ == "away":
+                        self.itemconfigure(ball, fill=self.fade(self.color, f))
+                    rr = r * (1 - 0.5 * f)
+                    self.coords(ball, x - rr, y - rr, x + rr, y + rr)
                     self.show(ball, True)
