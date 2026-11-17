@@ -10,3 +10,12 @@ def test_ideal_five_rate_follows_the_cost_of_a_five_hour_percent():
 
 def test_ideal_five_rate_needs_history():
     assert throttle.ideal_five_rate([(1, 0, 0), (2, 0.5, 0)], 100, 3) is None
+
+
+def test_follow_the_7d_plan_pauses_above_the_cap_and_resumes_under_it():
+    s = {**throttle.DEFAULTS["claude"], "fullBudget": True, "byWeek": True}
+    win = lambda usage, cap: [{"usage": usage, "reset": None, "key": "5h", "span": 5 * 3600, "cap": cap}]
+    assert throttle.decide("active", None, win(40, 30), s) == ("paused", "week")
+    assert throttle.decide("paused", "week", win(40, 30), s) == ("paused", "week")
+    assert throttle.decide("paused", "week", win(40, 45), s) == ("active", None)
+    assert throttle.decide("active", None, win(40, 30), {**s, "byWeek": False}) == ("active", None)

@@ -18,6 +18,7 @@ State: claude-governor-state.json   Log: claude-governor.log   Status for the UI
 History: usage-history.sqlite (usage_store.py), one row per successful usage poll (the dashboard's history and resets).
 """
 import hashlib, json, os, re, sqlite3, subprocess, sys, time, traceback
+from datetime import datetime
 
 import copilot_monitor, fsutil, http_util, logutil, openrouter_monitor, throttle, tray_icon, usage_store
 import pacer_config, paperclip_common
@@ -290,6 +291,8 @@ class Governor:
             {"usage": usage["five"], "reset": usage["resets5"], "key": "5h", "span": tray_icon.SPAN_S["5h"]},
             {"usage": usage["seven"], "reset": usage["resets7"], "key": "7d", "span": tray_icon.SPAN_S["7d"]}],
             "copilot": self.copilot_windows(cfg), "openrouter": self.openrouter_windows(cfg)}
+        if settings["claude"]["byWeek"] and readings["claude"]:
+            self.add_week_cap(readings["claude"][0], settings["claude"])
         desc = {"claude": (f"5h {usage['five']}% (resets {js(usage['resets5'])}), 7d {usage['seven']}% (resets {js(usage['resets7'])})"
                            if usage else "usage unavailable")}
         if readings["openrouter"]:
@@ -305,6 +308,22 @@ class Governor:
             paperclip_common.clear_agent_requests(self.requests)  # carried out; a newer request for a provider stays
         self.write_status(st, settings, usage)
         self.save_state(st)
+
+    def add_week_cap(self, five, s):
+        """Sets five["cap"]: the 5h usage that follows the pace keeping the 7d window on its plan line, by now (none
+        while the history is too short or the window has no reset)."""
+        try:
+            start = datetime.fromisoformat(five["reset"].replace("Z", "+00:00")).timestamp() - five["span"]
+        except (AttributeError, ValueError):
+            return
+        now = time.time()
+        try:
+            rate = throttle.ideal_five_rate(usage_store.rows(now - 7 * 86400), throttle.limits(s)[0], now)
+        except (sqlite3.Error, OSError, TimeoutError) as e:
+            self.log(f"WARN usage history not read for the 7d plan: {e}")
+            return
+        if rate:
+            five["cap"] = rate * (now - start) / 3600
 
     def copilot_windows(self, cfg):
         """The monthly Copilot quota as a usage window list: [] when Copilot is not throttled (hidden in the dashboard, or

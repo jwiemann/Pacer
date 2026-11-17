@@ -55,23 +55,27 @@ def keys(tmp_path, monkeypatch):
 
 
 def test_the_key_omp_spends_with_beats_the_environment_key(keys, monkeypatch):
+    monkeypatch.setattr(om, "agent_key", lambda: None)
     monkeypatch.setenv(om.ENV_VAR, "sk-or-v1-env-key")
     assert om.read_key() == "sk-or-v1-omp-key"
 
 
 def test_the_key_file_overrides_omp_and_the_environment(keys, monkeypatch):
+    monkeypatch.setattr(om, "agent_key", lambda: "sk-or-v1-agent-key")
     monkeypatch.setenv(om.ENV_VAR, "sk-or-v1-env-key")
     (keys / "openrouter.key").write_text("sk-or-v1-file-key\n", encoding="utf-8")
     assert om.read_key() == "sk-or-v1-file-key"
 
 
 def test_without_omp_config_the_environment_key_is_used(keys, monkeypatch):
+    monkeypatch.setattr(om, "agent_key", lambda: None)
     (keys / ".omp" / "agent" / "models.yml").unlink()
     monkeypatch.setenv(om.ENV_VAR, "sk-or-v1-env-key")
     assert om.read_key() == "sk-or-v1-env-key"
 
 
-def test_omp_entry_that_is_not_a_literal_key_is_ignored(keys):
+def test_omp_entry_that_is_not_a_literal_key_is_ignored(keys, monkeypatch):
+    monkeypatch.setattr(om, "agent_key", lambda: None)
     (keys / ".omp" / "agent" / "models.yml").write_text(MODELS_YML.replace("sk-or-v1-omp-key", "OPENROUTER_API_KEY"),
                                                         encoding="utf-8")
     assert om.read_key() is None
@@ -83,3 +87,17 @@ def test_omp_entry_that_is_not_a_literal_key_is_ignored(keys):
     ("pi_local", "github-copilot/gpt-5-mini", None), ("opencode_local", "github-copilot/gpt-5-mini", "copilot")])
 def test_agent_provider_follows_adapter_and_model(adapter, model, provider):
     assert throttle.provider_of({"adapterType": adapter, "adapterConfig": {"model": model}}) == provider
+
+
+def test_the_key_the_agents_spend_with_beats_omp_and_the_environment(keys, monkeypatch):
+    monkeypatch.setenv(om.ENV_VAR, "sk-or-v1-env-key")
+    monkeypatch.setattr(om, "agent_key", lambda: "sk-or-v1-agent-key")
+    assert om.read_key() == "sk-or-v1-agent-key"
+
+
+def test_history_of_another_key_is_not_part_of_the_chart(tmp_path):
+    from dashboard_data import quota_history
+    hist = tmp_path / "h.jsonl"
+    hist.write_text('{"t": 10, "used": 80}\n{"t": 20, "used": 5, "label": "a"}\n{"t": 30, "used": 7, "label": "b"}\n', encoding="utf-8")
+    assert quota_history(str(hist), 0, "a") == [(20, 5)]
+    assert [v for _t, v in quota_history(str(hist), 0)] == [80, 5, 7]

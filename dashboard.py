@@ -206,8 +206,8 @@ class Dashboard:
         for name in throttle.PROVIDERS:
             card = panel(throttle.LABEL[name], page)
             card.columnconfigure(0, weight=1)
-            pv = self.prov[name] = {"fb": tk.BooleanVar(), "pace": tk.BooleanVar(), "pause": tk.StringVar(), "resume": tk.StringVar(),
-                                    "rows": [], "card": card, "saved": throttle.DEFAULTS[name]}
+            pv = self.prov[name] = {"fb": tk.BooleanVar(), "pace": tk.BooleanVar(), "week": tk.BooleanVar(), "pause": tk.StringVar(),
+                                    "resume": tk.StringVar(), "rows": [], "card": card, "saved": throttle.DEFAULTS[name]}
             fb = Switch(card, "Use full budget", pv["fb"], self.setting_changed)
             fb.grid(row=1, column=0, columnspan=2, sticky="ew", pady=3)
             fb.bind("<Enter>", lambda e: self.show_tip(e, "The only limit is the real one: agents pause at 100%."))
@@ -223,6 +223,11 @@ class Dashboard:
             pace_sw.grid(row=4, column=0, columnspan=2, sticky="ew", pady=3)
             pace_sw.bind("<Enter>", lambda e: self.show_tip(e, "Also pauses the agents while the usage runs clearly ahead of the plan (red), until it is back on the plan line."))
             pace_sw.bind("<Leave>", self.hide_tip)
+            if "byWeek" in throttle.DEFAULTS[name]:  # Claude only: its 5h and 7d windows are tied together
+                week_sw = Switch(card, "Follow the 7d plan", pv["week"], self.setting_changed)
+                week_sw.grid(row=5, column=0, columnspan=2, sticky="ew", pady=3)
+                week_sw.bind("<Enter>", lambda e: self.show_tip(e, "Also pauses the agents while the 5h usage is above the pace that keeps the 7d usage on its plan line (green dashed line in the 5h graph), until it is under it."))
+                week_sw.bind("<Leave>", self.hide_tip)
         gen = self.gen = panel("General", page)
         gen.columnconfigure(0, weight=1)
         ka = Switch(gen, "Keep PC awake", self.ka_var, self.toggle_ka)
@@ -1178,7 +1183,7 @@ class Dashboard:
         count under full budget, where they are hidden)."""
         pv = self.prov[name]
         fb = bool(pv["fb"].get())
-        return (fb, bool(pv["pace"].get())) + (() if fb else (pv["pause"].get().strip(), pv["resume"].get().strip()))
+        return (fb, bool(pv["pace"].get()), bool(pv["week"].get())) + (() if fb else (pv["pause"].get().strip(), pv["resume"].get().strip()))
 
     def update_apply(self):
         """Show 'Apply' only while the entered settings differ from the saved ones; nothing takes effect before that."""
@@ -1187,7 +1192,7 @@ class Dashboard:
             fb, s = bool(pv["fb"].get()), pv["saved"]
             for w in pv["rows"]:  # limits are meaningless under full budget
                 (w.grid_remove if fb else w.grid)()
-            saved = (s["fullBudget"], s["byPace"]) + (() if fb else (str(s["pauseAt"]), str(s["resumeBelow"])))
+            saved = (s["fullBudget"], s["byPace"], s.get("byWeek", False)) + (() if fb else (str(s["pauseAt"]), str(s["resumeBelow"])))
             dirty = dirty or self.entered(name) != saved
         if dirty and self.pc_on:
             self.apply_btn.pack(side="right")
@@ -1248,13 +1253,14 @@ class Dashboard:
             ref = resume if blocked and usage < pause else pause  # a blocked provider stays blocked until it is below `resume`
             op = "\u2265" if usage >= ref else "<"
             nums = f"{usage:.1f}".removesuffix(".0") + f"% {op} {ref}%"  # one decimal at most: the box is narrow
-        why = {"limit": "limit reached", "pace": "too fast", "unknown": "no usage reading"}.get(reason, "")
+        why = {"limit": "limit reached", "pace": "too fast", "week": "above the 7d plan", "unknown": "no usage reading"}.get(reason, "")
         pause_tip = "full budget: pause at 100%" if fb else f"pause at {pause}%"
         rows = [(head, nums, hcolor, color, "\n".join(x for x in ({"-": "", "\u2717": "block", "\u2713": "allow"}[head], why if blocked else "") if x))]
         if blocked:  # \u25a0 limit, \u25b2 too fast, ? no reading; \u25b6 = what lets the agents run again
             rows += {"limit": [("\u25a0", f"{pause}%", MUTED, MUTED, "limit reached"),
                                ("\u25b6", f"< {resume}%", MUTED, MUTED, f"resume below {resume}%")],
                      "pace": [("\u25b2", "", MUTED, MUTED, "too fast"), ("\u25b6", "plan", MUTED, MUTED, "until back on plan")],
+                     "week": [("\u25b2", "7d", MUTED, MUTED, "above the 7d plan"), ("\u25b6", "plan", MUTED, MUTED, "until under the 7d plan line")],
                      "unknown": [("?", "", MUTED, MUTED, "no usage reading")]}.get(reason, [])
         elif rmode == "active":
             rows += [("\u25a0" if fb else "\u23f8", f"{pause}%", MUTED, MUTED, pause_tip)]
@@ -1306,6 +1312,8 @@ class Dashboard:
         new = {}
         for name, pv in self.prov.items():
             s = {**pv["saved"], "fullBudget": bool(pv["fb"].get()), "byPace": bool(pv["pace"].get())}
+            if "byWeek" in s:
+                s["byWeek"] = bool(pv["week"].get())
             if not s["fullBudget"]:
                 try:
                     p, r = int(pv["pause"].get()), int(pv["resume"].get())
@@ -1588,6 +1596,7 @@ class Dashboard:
             if not self.editing:
                 pv["fb"].set(saved["fullBudget"])
                 pv["pace"].set(saved["byPace"])
+                pv["week"].set(saved.get("byWeek", False))
                 pv["pause"].set(str(saved["pauseAt"]))
                 pv["resume"].set(str(saved["resumeBelow"]))
         if not self.editing:
@@ -1728,12 +1737,12 @@ class Dashboard:
             dots(xn, yn, xe, ye)
             c.create_text(W - R, ye + 16, text=f"{p['projected']:.0f}%", fill=color, font=small, anchor="ne")
 
-        # the 5h pace that keeps the 7d window on its plan line (see throttle.ideal_five_rate)
+        # the line the 5h usage has to stay under to keep the 7d window on its plan: what "Follow the 7d plan" enforces
         rate = throttle.ideal_five_rate(hist, thr, now) if win == "5h" else None
-        if rate and usage < 100:
-            t_end = min(end, now + (100 - usage) / rate * 3600)
-            ye = Y(usage + rate * (t_end - now) / 3600)
-            c.create_line(xn, yn, X(t_end), ye, fill=GOOD, dash=(3, 3))
+        if rate:
+            t_end = min(end, start + 100 / rate * 3600)
+            ye = Y(rate * (t_end - start) / 3600)
+            c.create_line(X(start), Y(0), X(t_end), ye, fill=GOOD, dash=(3, 3))
             c.create_text(min(X(t_end), W - R) - 4, ye - 4, text="7d plan", fill=GOOD, font=small, anchor="se")
 
         # gap to the plan line right now, in percentage points (rounded): + = ahead of plan (too much), - = budget left

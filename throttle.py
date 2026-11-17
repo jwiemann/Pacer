@@ -9,12 +9,14 @@ overall state is the worst of them.
   resumeBelow  resume them once every window is below this percentage
   byPace       also pause while a window burns so fast that it would hit the limit clearly before its reset (the red
                verdict of the dashboard), and resume once the usage is back on the plan line
+  byWeek       Claude only: also pause while the 5h window is above the pace that keeps the 7d window on its plan line
+               (ideal_five_rate; a window carries "cap" = the usage that pace allows by now), resume once it is under it
 """
 import tray_icon
 
 PROVIDERS = ("claude", "copilot", "openrouter")
 LABEL = {"claude": "Claude", "copilot": "Copilot", "openrouter": "OpenRouter"}
-DEFAULTS = {"claude": {"fullBudget": False, "pauseAt": 70, "resumeBelow": 60, "byPace": False},
+DEFAULTS = {"claude": {"fullBudget": False, "pauseAt": 70, "resumeBelow": 60, "byPace": False, "byWeek": False},
             # a monthly quota is only meaningful as a pace: percentage limits would pause until the next month
             "copilot": {"fullBudget": True, "pauseAt": 70, "resumeBelow": 60, "byPace": True},
             # the 100 % is the spend limit the user set on the API key: by default only that limit pauses the agents
@@ -39,7 +41,9 @@ def settings_for(cfg, name):
     raw = ((cfg or {}).get("providers") or {}).get(name)
     raw = raw if isinstance(raw, dict) else {}
     out = dict(DEFAULTS[name])
-    for key in ("fullBudget", "byPace"):
+    for key in ("fullBudget", "byPace", "byWeek"):
+        if key not in out:
+            continue
         if isinstance(raw.get(key), bool):
             out[key] = raw[key]
     if _pct(raw.get("pauseAt")) and _pct(raw.get("resumeBelow")) and raw["resumeBelow"] <= raw["pauseAt"]:
@@ -104,9 +108,9 @@ def overall(modes):
 
 def decide(mode, reason, windows, s, unknown=False):
     """(target, reason) for one provider. mode: its current sub-state; reason: why it was paused ("limit", "pace",
-    "unknown") or None; windows: [{"usage": %, "reset": ISO or None, "key": "5h"|"7d"|"cop", "span": seconds,
-    "early": seconds or None}]; unknown: no usage reading can be had (fail closed). target is "active" or "paused";
-    draining is the caller's business (agents with a live run)."""
+    "week", "unknown") or None; windows: [{"usage": %, "reset": ISO or None, "key": "5h"|"7d"|"cop", "span": seconds,
+    "early": seconds or None, "cap": % or absent}]; unknown: no usage reading can be had (fail closed). target is
+    "active" or "paused"; draining is the caller's business (agents with a live run)."""
     if unknown:
         return "paused", "unknown"
     pause_at, resume_below, _hard = limits(s)
@@ -119,18 +123,21 @@ def decide(mode, reason, windows, s, unknown=False):
         fast = any(p is not None and p["verdict"] == "too much" and tray_icon.window_verdict(p, w["usage"], w["span"]) == "bad"
                    for p, w in paces)
         calm = not any(p is not None and p["verdict"] == "too much" for p, _w in paces)  # back on the plan line
+    capped = bool(s.get("byWeek")) and any(w.get("cap") is not None and w["usage"] > w["cap"] for w in windows)
     if mode == "active":
         if over:
             return "paused", "limit"
         if fast:
             return "paused", "pace"
-        return "active", None
+        return ("paused", "week") if capped else ("active", None)
     if over:
         return "paused", "limit"
     if reason == "pace":
         if calm or not s["byPace"]:
-            return "active", None
+            return ("paused", "week") if capped else ("active", None)
         return "paused", "pace"
+    if reason == "week":
+        return ("paused", "week") if capped else ("active", None)
     if low and not fast:
-        return "active", None
+        return ("paused", "week") if capped else ("active", None)
     return "paused", reason or "limit"

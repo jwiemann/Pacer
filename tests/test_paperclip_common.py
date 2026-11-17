@@ -245,7 +245,7 @@ def test_limits_from_before_the_split_by_provider_move_to_claude(settings_file):
     pc.migrate_settings()
     assert pc.read_settings() == {"paperclip": True, "lang": "de",
                                   "providers": {"claude": {"fullBudget": True, "pauseAt": 80, "resumeBelow": 50}}}
-    assert pc.provider_settings("claude") == {"fullBudget": True, "pauseAt": 80, "resumeBelow": 50, "byPace": False}
+    assert pc.provider_settings("claude") == {"fullBudget": True, "pauseAt": 80, "resumeBelow": 50, "byPace": False, "byWeek": False}
     assert pc.provider_settings("copilot")["byPace"] is True  # untouched: its defaults
 
 
