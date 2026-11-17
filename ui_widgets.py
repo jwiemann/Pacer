@@ -352,6 +352,7 @@ class Link(tk.Canvas):
     balls. In "go" the balls follow `level` (0..1, set by the owner from the token rate): none at 0, more, closer and
     bigger balls the higher it is. Time-driven: tick(t) places them."""
     SPEED, MIN_SP, MAX_SP, LINE = 34.0, 13.0, 30.0, "#4a505a"  # px/s, spacing of balls at full / lowest level, line colour
+    BALL = "#6f86ab"  # the balls: a calm blue-gray, near the area under the graphs, so they do not draw the eye
 
     def __init__(self, parent, from_text=False):
         super().__init__(parent, bg=PANEL, highlightthickness=0, width=1, height=1)
@@ -423,7 +424,7 @@ class Link(tk.Canvas):
         for balls in self.balls.values():
             for row in balls:
                 for b in row:
-                    self.itemconfigure(b, fill=self.color)
+                    self.itemconfigure(b, fill=self.BALL)
         if self.gate is not None:
             self.itemconfigure(self.gate, fill=self.color, state="normal" if self.mode == "stop" else "hidden")
         for item in getattr(self, "away_items", []):
@@ -462,7 +463,7 @@ class Link(tk.Canvas):
                     x, y = self.point(pts, cum, s)
                     f = min(1.0, max(0.0, (s - cum[1]) / ((cum[2] - cum[1]) or 1))) if k_ == "away" else 0.0  # fading while it leaves
                     if k_ == "away":
-                        self.itemconfigure(ball, fill=self.fade(self.color, f))
+                        self.itemconfigure(ball, fill=self.fade(self.BALL, f))
                     rr = r * (1 - 0.5 * f)
                     self.coords(ball, x - rr, y - rr, x + rr, y + rr)
                     self.show(ball, True)
