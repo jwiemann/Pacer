@@ -27,7 +27,7 @@ import tray_icon  # noqa: E402
 from paperclip_common import (CFG, DIR, LOGS, URL, CLAUDE_EXE, SPAN_S, CHECK_FLAG, read_status, migrate_settings,  # noqa: E402
                               read_settings, write_settings, full_budget, provider_settings, keep_awake, sleep_when_idle,
                               fmt_min, evaluate, paperclip_enabled, request_agents)
-import copilot_monitor, openrouter_monitor, throttle  # noqa: E402
+import copilot_monitor, openrouter_keys, openrouter_monitor, secret_store, throttle  # noqa: E402
 from flow_card import FlowCard  # noqa: E402
 import autostart  # noqa: E402
 import i18n  # noqa: E402
@@ -40,7 +40,7 @@ from dashboard_data import (LAST, history, past_resets, throughput, kick_token_d
                             claude_cli_found, last_governor_error, fault_reason, claude_login, tray_state,
                             quota_history, quota_moved, COPILOT_HIST, OPENROUTER_HIST, pct_text, copilot_login, openrouter_key,
                             quota_spark)
-from ui_widgets import (BG, PANEL, FG, MUTED, BTN_HOVER, GOOD, WARN, BAD, BLUE, AREA, GRID, VIOLET, HEX, BORDER,  # noqa: E402
+from ui_widgets import (BG, PANEL, FG, MUTED, BTN_HOVER, GOOD, WARN, BAD, BLUE, AREA, GRID, VIOLET, HEX, BORDER, INPUT,  # noqa: E402
                         Switch, Tab, button, split_button, stepper, init_fonts, mono, round_corners)
 from winpos import save_position, saved_size, saved_position, work_area  # noqa: E402
 
@@ -91,7 +91,7 @@ class Dashboard:
         root.configure(bg=BG)
         root.resizable(True, True)
         self.dark_titlebar()
-        self.pinned = self.saved_choice("pinnedTab", ("live", "5h", "7d", "cop", "or"))  # tab picked by the user (remembered); None = follow the limiting window
+        self.pinned = self.saved_choice("pinnedTab", ("live", "5h", "7d", "cop", "or", "keys"))  # tab picked by the user (remembered); None = follow the limiting window
         self.upd_busy = False  # paperclipai update check running in a worker thread
         self._job = None    # pending refresh timer
         self._geo_job = None  # pending save of the window geometry
@@ -128,8 +128,9 @@ class Dashboard:
         self.tabs, self.groups, self.side, self.cop_on, self.or_on = {}, [], side, True, True
         self.idle = set()  # tab groups hidden because their provider used nothing for 24 h
         self.or_tab = True  # OPENROUTER tab shown: key present and it has a spend limit
+        self.keys_tab, self.keys_status = False, {}  # Keys tab shown: a management key is stored; its latest listing
         for title, wins in (("LIVE", (("live", "Tokens"),)), ("CLAUDE", (("5h", "5h"), ("7d", "7d"))), ("COPILOT", (("cop", "Month"),)),
-                            ("OPENROUTER", (("or", "Limit"),))):
+                            ("OPENROUTER", (("or", "Limit"), ("keys", "Keys")))):
             hdr = tk.Label(side, text=title, bg=PANEL, fg=MUTED, font=mono(8, True), anchor="w", padx=0, pady=0)
             for win, label in wins:
                 self.tabs[win] = Tab(side, label, lambda w=win: self.pick(w), self.unpin, self.toggle_tabs_only)
@@ -228,6 +229,8 @@ class Dashboard:
                 week_sw.grid(row=5, column=0, columnspan=2, sticky="ew", pady=3)
                 week_sw.bind("<Enter>", lambda e: self.show_tip(e, "Also pauses the agents while the 5h usage is above the pace that keeps the 7d usage on its plan line (green dashed line in the 5h graph), until it is under it."))
                 week_sw.bind("<Leave>", self.hide_tip)
+            if name == "openrouter":
+                self.build_mgmt_key(card, 6)
         gen = self.gen = panel("General", page)
         gen.columnconfigure(0, weight=1)
         ka = Switch(gen, "Keep PC awake", self.ka_var, self.toggle_ka)
@@ -370,7 +373,7 @@ class Dashboard:
         page, half = self.page, GAP // 2
         m = PAD_COMPACT if self.compact else PAD
         cards = [self.prov[n]["card"] for n in throttle.PROVIDERS
-                 if self.pc_on and (n != "copilot" or self.cop_on) and (n != "openrouter" or self.or_on)]
+                 if n == "openrouter" or (self.pc_on and (n != "copilot" or self.cop_on))]  # OpenRouter's card also holds the management key
         for w in [pv["card"] for pv in self.prov.values()] + [self.gen, self.msg]:
             w.grid_forget()
         wide = not self.compact and len(cards) > 1
@@ -576,6 +579,8 @@ class Dashboard:
     def redraw_chart(self):
         if self.sel == "live":
             self.live_frame()
+        elif self.sel == "keys":
+            self.draw_keys()
         elif self.chart_args is not None:
             self.draw_pace(*self.chart_args)
 
@@ -1055,13 +1060,17 @@ class Dashboard:
             self.place_details()
             self.fit_minsize()
 
+    def tab_shown(self, win):
+        """The OpenRouter tabs come and go on their own: Limit needs a key with a spend limit, Keys a management key."""
+        return {"or": self.or_tab, "keys": self.keys_tab}.get(win, True)
+
     def place_side(self):
         """Tab column (wide): the tab groups, Live first; the Copilot / OpenRouter groups only while they are in use.
         Compact: one row of tab tiles without group titles."""
         for w in self.side.winfo_children():
             w.pack_forget()
-        shown = [(hdr, wins) for title, hdr, wins in self.groups if title not in self.idle
-                 and (title != "COPILOT" or self.cop_on) and (title != "OPENROUTER" or self.or_tab)]
+        shown = [(hdr, [w for w in wins if self.tab_shown(w)]) for title, hdr, wins in self.groups if title not in self.idle
+                 and (title != "COPILOT" or self.cop_on) and (title != "OPENROUTER" or self.or_tab or self.keys_tab)]
         for _hdr, wins in shown:
             for win in wins:
                 self.tabs[win].layout(self.compact and not self.tabs_only)
@@ -1294,6 +1303,88 @@ class Dashboard:
         self.flow.set_rule(name, rows, None if usage is None else "away" if away else "go", color)
         self.flow.set_agents(name, on, enabled, label, lcolor, atip, *out)
 
+    def build_mgmt_key(self, card, row):
+        """Settings of the OpenRouter card: the management key that lists every key of the account. Entered once, kept
+        encrypted for this Windows user (secret_store); only its first and last characters are ever shown."""
+        tk.Label(card, text="Management key", bg=PANEL, fg=FG, font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", pady=(10, 2))
+        self.mgmt_hint = tk.Label(card, bg=PANEL, fg=MUTED, font=mono(9), anchor="e")
+        self.mgmt_hint.grid(row=row, column=1, sticky="e", pady=(10, 2))
+        self.mgmt_var = tk.StringVar()
+        entry = tk.Entry(card, textvariable=self.mgmt_var, show="\u2022", bg=INPUT, fg=FG, insertbackground=FG, relief="flat", bd=0,
+                         highlightthickness=1, highlightbackground=BORDER, highlightcolor=BLUE, font=mono(9))
+        entry.grid(row=row + 1, column=0, columnspan=2, sticky="ew", ipady=4, pady=2)
+        entry.bind("<Return>", lambda _e: self.save_mgmt_key() or "break")
+        btns = tk.Frame(card, bg=PANEL)
+        btns.grid(row=row + 2, column=0, columnspan=2, sticky="e", pady=(4, 0))
+        button(btns, "Remove", self.remove_mgmt_key, pad=(10, 4)).pack(side="left", padx=(0, 6))
+        button(btns, "Save key", self.save_mgmt_key, primary=True, pad=(10, 4)).pack(side="left")
+        tip = "Lists all OpenRouter keys of the account with their limits (Keys tab). Create it at openrouter.ai/settings/management-keys. Stored encrypted for this Windows user; only the start and end are shown."
+        for w in (entry, self.mgmt_hint):
+            w.bind("<Enter>", lambda e: self.show_tip(e, tip))
+            w.bind("<Leave>", self.hide_tip)
+
+    def show_mgmt_hint(self):
+        key = secret_store.load(openrouter_keys.KEY_FILE)
+        self.mgmt_hint.config(text=secret_store.mask(key) if key else "not set", fg=FG if key else MUTED)
+
+    def save_mgmt_key(self):
+        """Stores the typed key encrypted, clears the field at once and has the listing fetched in the background."""
+        key = self.mgmt_var.get().strip()
+        self.mgmt_var.set("")
+        if not key:
+            return
+        try:
+            secret_store.save(openrouter_keys.KEY_FILE, key)
+        except ValueError as e:
+            return self.flash(str(e), BAD)
+        self.show_mgmt_hint()
+        self.flash("management key saved, listing the keys...", GOOD)
+        threading.Thread(target=self.fetch_keys, daemon=True).start()
+
+    def fetch_keys(self):
+        try:
+            openrouter_keys.main()
+        except Exception:  # the message must not echo the key: the logged text is only the exception
+            LOGGER.error("openrouter keys\n%s", traceback.format_exc().rstrip())
+
+    def remove_mgmt_key(self):
+        secret_store.remove(openrouter_keys.KEY_FILE)
+        threading.Thread(target=self.fetch_keys, daemon=True).start()  # drops the stored listing
+        self.show_mgmt_hint()
+        self.flash("management key removed", GOOD)
+
+    def draw_keys(self):
+        """The Keys tab: one row per OpenRouter key of the account - name, a bar of the share of its limit spent, and
+        spend / limit (or the total spend of a key without limit); limited keys first, the fullest on top."""
+        c = self.chart
+        c.delete("all")
+        self.draw_zoom_chip(False, 0)
+        W, H = c.winfo_width(), c.winfo_height()
+        if W < 100 or H < 60:
+            return
+        ks = self.keys_status
+        keys = ks.get("keys") or []
+        if not keys:
+            c.create_text(W / 2, H / 2, fill=BAD if ks.get("state") == "signin" else MUTED, font=mono(9), width=W - 30,
+                          text=ks.get("error") or "No keys listed yet")
+            return
+        rows = sorted(keys, key=lambda k: (bool(k.get("unlimited")), -(k.get("used") or 0), -(k.get("daily") or 0)))
+        rh, L, name_w, right_w = 28, 10, min(170, W * 0.3), min(150, W * 0.3)
+        bx0, bx1 = L + name_w + 8, W - right_w - 14
+        for i, k in enumerate(rows[:max(1, (H - 10) // rh)]):
+            yc = 10 + i * rh + rh / 2
+            fg = MUTED if k.get("disabled") else FG
+            c.create_text(L, yc, text=str(k.get("name"))[:int(name_w / 7.5)], fill=fg, font=mono(9), anchor="w")
+            c.create_rectangle(bx0, yc - 4, bx1, yc + 4, fill=GRID, outline="")
+            used = None if k.get("unlimited") else k.get("used")
+            if used is not None:
+                color = HEX["bad" if used >= 100 else "warn" if used >= 80 else "good"]
+                c.create_rectangle(bx0, yc - 4, bx0 + (bx1 - bx0) * min(used, 100) / 100, yc + 4, fill=color, outline="")
+                text = f"${k.get('spent', 0):.2f} / ${k.get('limit'):g}"
+            else:
+                text = f"${(k.get('usage') or 0):.2f}  no limit"
+            c.create_text(W - 10, yc, text=text, fill=MUTED, font=mono(8), anchor="e")
+
     def toggle_ka(self):
         """Keep-awake applies at once (no Apply step): the tray polls the settings file and holds the wake lock."""
         on = bool(self.ka_var.get())
@@ -1420,6 +1511,13 @@ class Dashboard:
             self.place_side()
         if not or_tab and sel == "or":
             self.pinned, sel = None, limiting
+        ks = openrouter_keys.read_status()
+        if ks != self.keys_status:
+            self.keys_status = ks
+            self.keys_tab = bool(ks)
+            self.place_side()
+        if sel == "keys" and not self.keys_tab:
+            self.pinned, sel = None, limiting
         cp_usage = None if cs.get("unlimited") else cs.get("used")
         cp_reset = cs.get("resets")
         cp_period = copilot_monitor.period(cp_reset) if cp_reset else None
@@ -1446,6 +1544,11 @@ class Dashboard:
                              quota_spark(cp_hist, cp_reset, cp_span, cp_usage, now), held["copilot"])
         self.tabs["or"].set("-" if or_usage is None else pct_text(or_usage), or_color, sel == "or",
                             quota_spark(or_hist, or_reset, or_span, or_usage, now), held["openrouter"])
+        keys = [k for k in ks.get("keys") or [] if not k.get("unlimited") and k.get("used") is not None]
+        top = max((k["used"] for k in keys), default=None)
+        self.tabs["keys"].set(("!" if ks.get("state") in ("signin", "error") and not ks.get("keys") else str(len(ks.get("keys") or [])))
+                              if top is None else pct_text(top),
+                              MUTED if top is None else HEX["bad" if top >= 100 else "warn" if top >= 80 else "good"], sel == "keys")
         if sel != self.sel:
             self.switch_view(sel)
         self.sel = sel
@@ -1470,13 +1573,18 @@ class Dashboard:
         elif sel == "or":
             self.big.config(text="-" if or_usage is None else pct_text(or_usage))
             self.draw_pace("or", 1, or_usage, or_reset, or_p, or_thr, or_hist, or_color, now, or_span)
+        elif sel == "keys":
+            today = sum(k.get("daily") or 0 for k in ks.get("keys") or [])
+            self.big.config(text=f"${today:.2f}" if today < 10 else f"${today:.0f}")
+            self.cost.config(text=" ")
+            self.draw_keys()
         else:
             usage, p, vcolor = info[sel]
             key, rk, idx = wins[sel]
             self.big.config(text="-" if usage is None else f"{usage:g}%")
             self.draw_pace(sel, idx, usage, u.get(rk), p, thr, hist, vcolor, now)
         resets = {"5h": u.get("resets5"), "7d": u.get("resets7"), "cop": cp_reset, "or": or_reset}
-        self.sub.config(text=countdown_text(resets.get(sel)) or " ")
+        self.sub.config(text="today" if sel == "keys" else countdown_text(resets.get(sel)) or " ")
         self.update_cost()
 
         # throughput
@@ -1589,6 +1697,7 @@ class Dashboard:
         for name in throttle.PROVIDERS:
             self.update_lane(name, subs[name], *feeds[name], status_at, pc_on)
         self.flow.refresh_lines()
+        self.show_mgmt_hint()
 
         # settings (do not clobber a pending change)
         for name, pv in self.prov.items():

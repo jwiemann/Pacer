@@ -41,6 +41,12 @@ EXACT = {
     "The only limit is the real one: agents pause at 100%.": "Es gilt nur das echte Limit: Agenten pausieren bei 100%.",
     "Also pauses the agents while the usage runs clearly ahead of the plan (red), until it is back on the plan line.":
         "Pausiert die Agenten auch, solange die Nutzung deutlich über dem Plan liegt (rot), bis sie wieder auf der Planlinie ist.",
+    "Management key": "Management-Key", "Save key": "Key speichern", "Remove": "Entfernen", "not set": "nicht gesetzt", "today": "heute",
+    "that does not look like an API key": "das sieht nicht nach einem API-Key aus",
+    "management key saved, listing the keys...": "Management-Key gespeichert, lese die Keys...",
+    "management key removed": "Management-Key entfernt", "No keys listed yet": "Noch keine Keys gelistet",
+    "Lists all OpenRouter keys of the account with their limits (Keys tab). Create it at openrouter.ai/settings/management-keys. Stored encrypted for this Windows user; only the start and end are shown.":
+        "Listet alle OpenRouter-Keys des Kontos mit ihren Limits (Tab Keys). Anlegen unter openrouter.ai/settings/management-keys. Wird für diesen Windows-Benutzer verschlüsselt gespeichert; nur Anfang und Ende werden angezeigt.",
     "7d plan": "7d-Plan", "above the 7d plan": "über dem 7d-Plan", "until under the 7d plan line": "bis unter der 7d-Planlinie",
     "Follow the 7d plan": "7d-Plan folgen",
     "Also pauses the agents while the 5h usage is above the pace that keeps the 7d usage on its plan line (green dashed line in the 5h graph), until it is under it.":
