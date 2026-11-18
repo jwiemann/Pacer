@@ -41,7 +41,7 @@ EXACT = {
     "The only limit is the real one: agents pause at 100%.": "Es gilt nur das echte Limit: Agenten pausieren bei 100%.",
     "Also pauses the agents while the usage runs clearly ahead of the plan (red), until it is back on the plan line.":
         "Pausiert die Agenten auch, solange die Nutzung deutlich über dem Plan liegt (rot), bis sie wieder auf der Planlinie ist.",
-    "Management key": "Management-Key", "Save key": "Key speichern", "Remove": "Entfernen", "not set": "nicht gesetzt", "today": "heute",
+    "Management key": "Management-Key", "credits": "Guthaben", "Save key": "Key speichern", "Remove": "Entfernen", "not set": "nicht gesetzt", "today": "heute",
     "that does not look like an API key": "das sieht nicht nach einem API-Key aus",
     "management key saved, listing the keys...": "Management-Key gespeichert, lese die Keys...",
     "management key removed": "Management-Key entfernt", "No keys listed yet": "Noch keine Keys gelistet",
@@ -182,6 +182,7 @@ RULES = [
           + (" (wird angewendet...)" if m[4] else "") + (f" - Reset in {dur(m[5])}" if m[5] else "")),
     _rule(rf"reset in {DUR}", lambda m: f"Reset in {dur(m[1])}"),
     _rule(r"(Claude|Copilot|OpenRouter) (paused|draining)", lambda m: f"{m[1]} {STATES[m[2]]}"),
+    _rule(r"\$([\d.]+) left of \$(\d+)", lambda m: f"${m[1]} übrig von ${m[2]}"),
     _rule(r"resume below (\d+)%", lambda m: f"fortsetzen unter {m[1]}%"),
     _rule(r"(\d+)/(\d+) running", lambda m: f"{m[1]}/{m[2]} läuft"),
     _rule(r"(\d+) of (\d+) agents running", lambda m: f"{m[1]} von {m[2]} Agenten laufen"),

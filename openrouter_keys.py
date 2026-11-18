@@ -51,6 +51,19 @@ def fetch(key):
     return keys
 
 
+def credits(key):
+    """The account's credits: {"total", "used", "left"} in USD, or None when the endpoint does not answer (the key list
+    still shows)."""
+    try:
+        d = http_util.request_json("https://openrouter.ai/api/v1/credits",
+                                   headers={"Authorization": "Bearer " + key, "Accept": "application/json"}, timeout=30)
+        data = d["data"]
+        total, used = float(data["total_credits"]), float(data["total_usage"])
+    except (http_util.HttpError, ValueError, KeyError, TypeError):
+        return None
+    return {"total": total, "used": used, "left": total - used}
+
+
 def write_status(st):
     if st["state"] == "error":  # transient failure: keep the last list
         st = {**{k: v for k, v in read_status().items() if k == "keys"}, **st}
@@ -65,7 +78,7 @@ def main():
             os.remove(STATUS)
         return
     try:
-        write_status({"state": "ok", "keys": fetch(key)})
+        write_status({"state": "ok", "keys": fetch(key), "credits": credits(key)})
     except http_util.HttpError as e:
         if e.status in (401, 403):
             write_status({"state": "signin", "keys": [], "error": f"OpenRouter rejected the management key (HTTP {e.status})"})

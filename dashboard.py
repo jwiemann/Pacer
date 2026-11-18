@@ -1370,6 +1370,10 @@ class Dashboard:
                           text=ks.get("error") or "No keys listed yet")
             return
         rows = sorted(keys, key=lambda k: (bool(k.get("unlimited")), -(k.get("used") or 0), -(k.get("daily") or 0)))
+        cr = ks.get("credits")
+        if cr and cr.get("total"):  # the account's credits first: what is left to spend at all
+            share = 100 * cr["used"] / cr["total"]
+            rows.insert(0, {"name": "credits", "unlimited": False, "used": share, "text": f"${cr['left']:.2f} left of ${cr['total']:.0f}"})
         rh, L, name_w, right_w = 28, 10, min(170, W * 0.3), min(150, W * 0.3)
         bx0, bx1 = L + name_w + 8, W - right_w - 14
         for i, k in enumerate(rows[:max(1, (H - 10) // rh)]):
@@ -1381,7 +1385,7 @@ class Dashboard:
             if used is not None:
                 color = HEX["bad" if used >= 100 else "warn" if used >= 80 else "good"]
                 c.create_rectangle(bx0, yc - 4, bx0 + (bx1 - bx0) * min(used, 100) / 100, yc + 4, fill=color, outline="")
-                text = f"${k.get('spent', 0):.2f} / ${k.get('limit'):g}"
+                text = k.get("text") or f"${k.get('spent', 0):.2f} / ${k.get('limit'):g}"
             else:
                 text = f"${(k.get('usage') or 0):.2f}  no limit"
             c.create_text(W - 10, yc, text=text, fill=MUTED, font=mono(8), anchor="e")
