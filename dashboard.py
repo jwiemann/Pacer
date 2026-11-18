@@ -1062,14 +1062,15 @@ class Dashboard:
 
     def tab_shown(self, win):
         """The OpenRouter tabs come and go on their own: Limit needs a key with a spend limit, Keys a management key."""
-        return {"or": self.or_tab, "keys": self.keys_tab}.get(win, True)
+        return {"or": self.or_tab and "OPENROUTER" not in self.idle, "keys": self.keys_tab}.get(win, True)  # an idle provider hides only Limit
 
     def place_side(self):
         """Tab column (wide): the tab groups, Live first; the Copilot / OpenRouter groups only while they are in use.
         Compact: one row of tab tiles without group titles."""
         for w in self.side.winfo_children():
             w.pack_forget()
-        shown = [(hdr, [w for w in wins if self.tab_shown(w)]) for title, hdr, wins in self.groups if title not in self.idle
+        shown = [(hdr, [w for w in wins if self.tab_shown(w)]) for title, hdr, wins in self.groups
+                 if (title not in self.idle or (title == "OPENROUTER" and self.keys_tab))
                  and (title != "COPILOT" or self.cop_on) and (title != "OPENROUTER" or self.or_tab or self.keys_tab)]
         for _hdr, wins in shown:
             for win in wins:
